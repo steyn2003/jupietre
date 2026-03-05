@@ -70,7 +70,7 @@ When assigned a ticket:
   inProgressState: "In Development",
   doneState: "In Review",
   hasDevAgent: true,
-  maxTurns: 30,
+  maxTurns: 200,
   model: "claude-opus-4-6",
   devAgentModel: "sonnet",
 };
