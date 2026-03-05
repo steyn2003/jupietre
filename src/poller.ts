@@ -1,0 +1,98 @@
+import type { RoleConfig } from "./roles/index.js";
+import { queryIssues, moveIssue } from "./tools/linear.js";
+import { invokeAgent } from "./agent.js";
+
+const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS) || 2 * 60 * 1000;
+
+/** Issues currently being worked on — prevents double-pickup */
+const activeIssues = new Set<string>();
+
+async function poll(role: RoleConfig) {
+  try {
+    const issues = await queryIssues(role.pollerFilter);
+
+    for (const issue of issues) {
+      if (activeIssues.has(issue.id)) continue;
+
+      console.log(
+        `[${role.displayName}] Picking up ${issue.identifier}: ${issue.title}`,
+      );
+      activeIssues.add(issue.id);
+
+      // Try to move to in-progress state (acts as a lock if Linear is writable)
+      try {
+        await moveIssue(issue.id, role.inProgressState);
+      } catch (err) {
+        console.warn(
+          `[${role.displayName}] Could not move ${issue.identifier} to ${role.inProgressState} (read-only?), proceeding anyway`,
+        );
+      }
+
+      // Process the issue (don't await — let the poller continue for other issues)
+      processIssue(role, issue).finally(() => {
+        activeIssues.delete(issue.id);
+      });
+    }
+  } catch (err) {
+    console.error(`[${role.displayName}] Polling error:`, err);
+  }
+}
+
+async function processIssue(
+  role: RoleConfig,
+  issue: { id: string; identifier: string; title: string },
+) {
+  const prompt = `You have been assigned Linear issue ${issue.identifier}: "${issue.title}".
+
+Fetch the full issue details using linear_get_issue, then follow your workflow to complete the task.
+
+Issue identifier: ${issue.identifier}`;
+
+  try {
+    console.log(`[${role.displayName}] Starting work on ${issue.identifier}`);
+    const result = await invokeAgent(prompt, role);
+    console.log(
+      `[${role.displayName}] Completed ${issue.identifier}: ${result.slice(0, 200)}`,
+    );
+
+    // Try to move to done state
+    try {
+      await moveIssue(issue.id, role.doneState);
+      console.log(
+        `[${role.displayName}] Moved ${issue.identifier} to ${role.doneState}`,
+      );
+    } catch {
+      console.warn(
+        `[${role.displayName}] Could not move ${issue.identifier} to ${role.doneState} (read-only?)`,
+      );
+    }
+  } catch (err) {
+    console.error(
+      `[${role.displayName}] Error processing ${issue.identifier}:`,
+      err,
+    );
+    // Try to add a comment about the failure
+    try {
+      const { LinearClient } = await import("@linear/sdk");
+      const client = new LinearClient({ apiKey: process.env.LINEAR_API_KEY! });
+      await client.createComment({
+        issueId: issue.id,
+        body: `**${role.displayName} agent failed:**\n\n\`\`\`\n${err instanceof Error ? err.message : String(err)}\n\`\`\``,
+      });
+    } catch {
+      // Best effort
+    }
+  }
+}
+
+export function startPoller(role: RoleConfig) {
+  console.log(
+    `[${role.displayName}] Starting poller — checking for '${role.pollerFilter.stateName}'${role.pollerFilter.label ? ` with label '${role.pollerFilter.label}'` : ""} every ${POLL_INTERVAL_MS / 1000}s`,
+  );
+
+  // Initial poll immediately
+  poll(role);
+
+  // Then poll on interval
+  setInterval(() => poll(role), POLL_INTERVAL_MS);
+}
