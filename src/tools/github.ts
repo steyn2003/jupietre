@@ -1,10 +1,41 @@
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 
 const exec = promisify(execFile);
 const REPO_DIR = process.env.REPO_DIR ?? "/data/repo";
+
+async function installDeps(dir: string) {
+  // JS/TS dependencies
+  if (existsSync(join(dir, "package.json"))) {
+    let cmd: string;
+    let args: string[];
+    if (existsSync(join(dir, "bun.lockb")) || existsSync(join(dir, "bun.lock"))) {
+      cmd = "bun";
+      args = ["install", "--frozen-lockfile"];
+    } else if (existsSync(join(dir, "pnpm-lock.yaml"))) {
+      cmd = "pnpm";
+      args = ["install", "--frozen-lockfile"];
+    } else if (existsSync(join(dir, "yarn.lock"))) {
+      cmd = "yarn";
+      args = ["install", "--frozen-lockfile"];
+    } else {
+      cmd = "npm";
+      args = ["ci"];
+    }
+    console.log(`[worktree] Installing JS dependencies with ${cmd} in ${dir}`);
+    await exec(cmd, args, { cwd: dir, timeout: 120_000 });
+  }
+
+  // Python dependencies
+  if (existsSync(join(dir, "pyproject.toml"))) {
+    console.log(`[worktree] Installing Python dependencies with uv in ${dir}`);
+    await exec("uv", ["sync"], { cwd: dir, timeout: 120_000 });
+  }
+}
 
 async function run(cmd: string, args: string[], cwd?: string) {
   const { stdout, stderr } = await exec(cmd, args, {
@@ -30,7 +61,8 @@ export const gitCreateWorktree = tool(
     const worktreeDir = `/data/worktrees/${branch}`;
     await run("git", ["fetch", "origin", baseBranch]);
     await run("git", ["worktree", "add", "-b", branch, worktreeDir, `origin/${baseBranch}`]);
-    return { content: [{ type: "text" as const, text: `Worktree created at ${worktreeDir} on branch ${branch}` }] };
+    await installDeps(worktreeDir);
+    return { content: [{ type: "text" as const, text: `Worktree created at ${worktreeDir} on branch ${branch} (dependencies installed)` }] };
   },
 );
 

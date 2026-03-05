@@ -25,6 +25,14 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
   && apt-get update && apt-get install -y gh \
   && rm -rf /var/lib/apt/lists/*
 
+# Python tooling (uv for package management, python for linting/type-checking)
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv \
+  && rm -rf /var/lib/apt/lists/* \
+  && curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+
+# Package managers for target repos
+RUN npm install -g pnpm
+
 # Claude Code CLI (needed by the agent SDK for dev-agent subagent)
 RUN npm install -g @anthropic-ai/claude-code
 

@@ -132,7 +132,7 @@ export const linearCreateIssue = tool(
 export async function queryIssues(filter: {
   label?: string;
   stateName: string | string[];
-}): Promise<Array<{ id: string; identifier: string; title: string; stateName: string }>> {
+}): Promise<Array<{ id: string; identifier: string; title: string; stateName: string; labels: string[] }>> {
   const client = getClient();
 
   const stateNames = Array.isArray(filter.stateName) ? filter.stateName : [filter.stateName];
@@ -151,14 +151,16 @@ export async function queryIssues(filter: {
     },
   });
 
-  const results: Array<{ id: string; identifier: string; title: string; stateName: string }> = [];
+  const results: Array<{ id: string; identifier: string; title: string; stateName: string; labels: string[] }> = [];
   for (const i of issues.nodes) {
     const state = await i.state;
+    const issueLabels = await i.labels();
     results.push({
       id: i.id,
       identifier: i.identifier,
       title: i.title,
       stateName: state?.name ?? "Unknown",
+      labels: issueLabels.nodes.map((l) => l.name.toLowerCase()),
     });
   }
   return results;

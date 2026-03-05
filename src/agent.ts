@@ -2,13 +2,51 @@ import { query, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { traceAgent } from "./lib/tracing.js";
 import type { RoleConfig } from "./roles/index.js";
 
-function extractText(message: any): string {
-  const content = message?.message?.content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter((b: any) => b.type === "text")
-    .map((b: any) => b.text)
-    .join("");
+function formatMessage(message: any): string {
+  const base = `[sdk] ${message.type}${
+    "subtype" in message ? `:${message.subtype}` : ""
+  }`;
+
+  if (message.type === "assistant") {
+    const content = message?.message?.content;
+    if (!Array.isArray(content)) return base;
+
+    const parts: string[] = [];
+
+    // Collect text (truncated)
+    const text = content
+      .filter((b: any) => b.type === "text")
+      .map((b: any) => b.text)
+      .join("")
+      .trim();
+    if (text) {
+      parts.push(text.length > 200 ? text.slice(0, 200) + "..." : text);
+    }
+
+    // Collect tool uses
+    const tools = content
+      .filter((b: any) => b.type === "tool_use")
+      .map((b: any) => b.name);
+    if (tools.length) {
+      parts.push(`tools=[${tools.join(", ")}]`);
+    }
+
+    return parts.length ? `${base} | ${parts.join(" | ")}` : base;
+  }
+
+  if (message.type === "user") {
+    const content = message?.message?.content;
+    if (!Array.isArray(content)) return base;
+
+    // Show tool results summary
+    const toolResults = content.filter((b: any) => b.type === "tool_result");
+    if (toolResults.length) {
+      return `${base} | ${toolResults.length} tool result(s)`;
+    }
+    return base;
+  }
+
+  return base;
 }
 
 export async function invokeAgent(
@@ -36,9 +74,15 @@ export async function invokeAgent(
             "Use for implementing features, fixing bugs, refactoring code, " +
             "running tests, and any task that requires reading/writing files or executing commands.",
           prompt:
-            "You are an autonomous dev agent working in Steyn's homelab repo. " +
-            "Implement tasks fully. Commit your work with descriptive messages. " +
-            "Do not ask questions — make reasonable decisions and proceed.",
+            "You are an autonomous dev agent. Implement tasks fully. " +
+            "Do not ask questions — make reasonable decisions and proceed.\n\n" +
+            "## Key Practices\n" +
+            "- TDD: Write a failing test first, then minimal code to pass, then refactor. Never skip the red-green cycle.\n" +
+            "- Debugging: Find root cause before fixing. Read errors carefully. Trace data flow. One fix at a time.\n" +
+            "- Verification: Run tests/build BEFORE claiming done. Evidence before assertions.\n" +
+            "- Commits: Small, focused, conventional commit messages (feat:, fix:, refactor:, etc.).\n" +
+            "- No debug logs, commented-out code, or unrelated changes.\n" +
+            "- Keep it simple: YAGNI, DRY, no over-engineering.",
           model: role.devAgentModel ?? "opus",
         };
       }
@@ -62,9 +106,7 @@ export async function invokeAgent(
 
       try {
         for await (const message of session) {
-          console.log(
-            `[sdk] message type=${message.type}${"subtype" in message ? ` subtype=${message.subtype}` : ""}`,
-          );
+          console.log(formatMessage(message));
           if (message.type === "result") {
             const msg = message as any;
             if (msg.subtype === "success") {

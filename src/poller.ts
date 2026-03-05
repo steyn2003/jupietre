@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import type { RoleConfig } from "./roles/index.js";
 import { queryIssues, moveIssue } from "./tools/linear.js";
 import { invokeAgent } from "./agent.js";
@@ -13,6 +14,19 @@ async function poll(role: RoleConfig) {
 
     for (const issue of issues) {
       if (activeIssues.has(issue.id)) continue;
+
+      // skipQA: if this role is the tester and the issue has "skipqa" label, auto-advance
+      if (role.name === "tester" && issue.labels.includes("skipqa")) {
+        console.log(
+          `[${role.displayName}] Skipping QA for ${issue.identifier} (skipQA label) — auto-advancing to ${role.doneState}`,
+        );
+        try {
+          await moveIssue(issue.id, role.doneState);
+        } catch {
+          console.warn(`[${role.displayName}] Could not auto-advance ${issue.identifier}`);
+        }
+        continue;
+      }
 
       console.log(
         `[${role.displayName}] Picking up ${issue.identifier}: ${issue.title} (state: ${issue.stateName})`,
@@ -40,7 +54,7 @@ async function poll(role: RoleConfig) {
 
 async function processIssue(
   role: RoleConfig,
-  issue: { id: string; identifier: string; title: string; stateName: string },
+  issue: { id: string; identifier: string; title: string; stateName: string; labels: string[] },
 ) {
   const prompt = `You have been assigned Linear issue ${issue.identifier}: "${issue.title}".
 
@@ -49,6 +63,22 @@ Fetch the full issue details using linear_get_issue, then follow your workflow t
 Issue identifier: ${issue.identifier}`;
 
   try {
+    // Ensure the repo is up to date before starting work
+    const repoDir = process.env.REPO_DIR || "/data/repo";
+    try {
+      console.log(`[${role.displayName}] Syncing repo before starting ${issue.identifier}`);
+      execSync("git fetch origin && git pull --ff-only", {
+        cwd: repoDir,
+        stdio: "pipe",
+        timeout: 30_000,
+      });
+    } catch (err) {
+      console.warn(
+        `[${role.displayName}] Git sync failed (continuing anyway):`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+
     console.log(`[${role.displayName}] Starting work on ${issue.identifier}`);
     const result = await invokeAgent(prompt, role);
     console.log(
