@@ -15,7 +15,7 @@ async function poll(role: RoleConfig) {
       if (activeIssues.has(issue.id)) continue;
 
       console.log(
-        `[${role.displayName}] Picking up ${issue.identifier}: ${issue.title}`,
+        `[${role.displayName}] Picking up ${issue.identifier}: ${issue.title} (state: ${issue.stateName})`,
       );
       activeIssues.add(issue.id);
 
@@ -40,7 +40,7 @@ async function poll(role: RoleConfig) {
 
 async function processIssue(
   role: RoleConfig,
-  issue: { id: string; identifier: string; title: string },
+  issue: { id: string; identifier: string; title: string; stateName: string },
 ) {
   const prompt = `You have been assigned Linear issue ${issue.identifier}: "${issue.title}".
 
@@ -55,16 +55,18 @@ Issue identifier: ${issue.identifier}`;
       `[${role.displayName}] Completed ${issue.identifier}: ${result.slice(0, 200)}`,
     );
 
-    // Try to move to done state
-    try {
-      await moveIssue(issue.id, role.doneState);
-      console.log(
-        `[${role.displayName}] Moved ${issue.identifier} to ${role.doneState}`,
-      );
-    } catch {
-      console.warn(
-        `[${role.displayName}] Could not move ${issue.identifier} to ${role.doneState} (read-only?)`,
-      );
+    // Try to move to done state (unless the agent manages its own transitions)
+    if (role.autoMoveToDone !== false) {
+      try {
+        await moveIssue(issue.id, role.doneState);
+        console.log(
+          `[${role.displayName}] Moved ${issue.identifier} to ${role.doneState}`,
+        );
+      } catch {
+        console.warn(
+          `[${role.displayName}] Could not move ${issue.identifier} to ${role.doneState} (read-only?)`,
+        );
+      }
     }
   } catch (err) {
     console.error(
@@ -86,8 +88,11 @@ Issue identifier: ${issue.identifier}`;
 }
 
 export function startPoller(role: RoleConfig) {
+  const stateNames = Array.isArray(role.pollerFilter.stateName)
+    ? role.pollerFilter.stateName.join("' or '")
+    : role.pollerFilter.stateName;
   console.log(
-    `[${role.displayName}] Starting poller — checking for '${role.pollerFilter.stateName}'${role.pollerFilter.label ? ` with label '${role.pollerFilter.label}'` : ""} every ${POLL_INTERVAL_MS / 1000}s`,
+    `[${role.displayName}] Starting poller — checking for '${stateNames}'${role.pollerFilter.label ? ` with label '${role.pollerFilter.label}'` : ""} every ${POLL_INTERVAL_MS / 1000}s`,
   );
 
   // Initial poll immediately

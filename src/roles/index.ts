@@ -12,13 +12,16 @@ export interface RoleConfig {
   pollerFilter: {
     /** Only pick up issues with this label (undefined = no label check) */
     label?: string;
-    /** Pick up issues in this workflow state name */
-    stateName: string;
+    /** Pick up issues in this workflow state name (or multiple states) */
+    stateName: string | string[];
   };
   /** State to move issue to when work begins */
   inProgressState: string;
   /** State to move issue to when work is complete */
   doneState: string;
+  /** Whether the poller should auto-move to doneState after the agent completes (default: true).
+   *  Set to false when the agent manages its own state transitions (e.g. PM may move to "Waiting"). */
+  autoMoveToDone?: boolean;
   /** Whether this role has the dev-agent subagent */
   hasDevAgent: boolean;
   /** Max turns for the agent session */

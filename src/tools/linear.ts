@@ -131,24 +131,37 @@ export const linearCreateIssue = tool(
 /** Query Linear for issues matching a filter. Used by the poller. */
 export async function queryIssues(filter: {
   label?: string;
-  stateName: string;
-}): Promise<Array<{ id: string; identifier: string; title: string }>> {
+  stateName: string | string[];
+}): Promise<Array<{ id: string; identifier: string; title: string; stateName: string }>> {
   const client = getClient();
+
+  const stateNames = Array.isArray(filter.stateName) ? filter.stateName : [filter.stateName];
+
+  const stateFilter =
+    stateNames.length === 1
+      ? { name: { eqIgnoreCase: stateNames[0] } }
+      : { name: { in: stateNames } };
 
   const issues = await client.issues({
     filter: {
-      state: { name: { eqIgnoreCase: filter.stateName } },
+      state: stateFilter,
       ...(filter.label
         ? { labels: { some: { name: { eqIgnoreCase: filter.label } } } }
         : {}),
     },
   });
 
-  return issues.nodes.map((i) => ({
-    id: i.id,
-    identifier: i.identifier,
-    title: i.title,
-  }));
+  const results: Array<{ id: string; identifier: string; title: string; stateName: string }> = [];
+  for (const i of issues.nodes) {
+    const state = await i.state;
+    results.push({
+      id: i.id,
+      identifier: i.identifier,
+      title: i.title,
+      stateName: state?.name ?? "Unknown",
+    });
+  }
+  return results;
 }
 
 /** Move an issue to a new state by name. Used by the poller. */
