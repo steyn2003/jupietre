@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     environment:
       AGENT_ROLE: pm
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       LINEAR_API_KEY: ${LINEAR_API_KEY}
       GITHUB_TOKEN: ${GITHUB_TOKEN}
       GH_TOKEN: ${GITHUB_TOKEN}
@@ -24,6 +26,8 @@ services:
     restart: unless-stopped
     environment:
       AGENT_ROLE: engineer
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       LINEAR_API_KEY: ${LINEAR_API_KEY}
       GITHUB_TOKEN: ${GITHUB_TOKEN}
       GH_TOKEN: ${GITHUB_TOKEN}
@@ -43,6 +47,8 @@ services:
     restart: unless-stopped
     environment:
       AGENT_ROLE: tester
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       LINEAR_API_KEY: ${LINEAR_API_KEY}
       GITHUB_TOKEN: ${GITHUB_TOKEN}
       GH_TOKEN: ${GITHUB_TOKEN}

@@ -72,8 +72,9 @@ Dependencies are auto-detected by lock file when creating worktrees:
 ### Environment Variables
 
 ```bash
-# Required
-ANTHROPIC_API_KEY=sk-ant-...       # Claude API key
+# Required — pick ONE authentication method:
+CLAUDE_CODE_OAUTH_TOKEN=...       # OAuth token from Max/Pro subscription (run `claude setup-token`)
+ANTHROPIC_API_KEY=sk-ant-...       # OR: Claude API key (pay-per-token billing)
 LINEAR_API_KEY=lin_api_...         # Linear API key
 GITHUB_TOKEN=ghp_...              # GitHub token for cloning and PRs
 GITHUB_REPO=owner/repo            # Target repository (e.g. 'acme/webapp')
@@ -101,7 +102,15 @@ STATUS_WAITING=Waiting            # PM waiting for clarification
 ```bash
 docker build -t jupietre .
 
-# Run the PM agent
+# Run with OAuth token (Max/Pro subscription)
+docker run -e AGENT_ROLE=pm \
+  -e CLAUDE_CODE_OAUTH_TOKEN=... \
+  -e LINEAR_API_KEY=... \
+  -e GITHUB_TOKEN=... \
+  -e GITHUB_REPO=owner/repo \
+  jupietre
+
+# Or run with API key
 docker run -e AGENT_ROLE=pm \
   -e ANTHROPIC_API_KEY=... \
   -e LINEAR_API_KEY=... \
