@@ -55,6 +55,18 @@ Picks up tickets in **In Review**. Compares the PR diff against ticket requireme
 - **Hooks** provide MCP audit trail and subagent tracking
 - **Cost tracking** logs per-ticket cost to console and posts a summary comment on Linear
 
+## Supported Project Types
+
+Dependencies are auto-detected by lock file when creating worktrees:
+
+| Ecosystem | Detection | Install Command |
+|-----------|-----------|-----------------|
+| bun | `bun.lockb` / `bun.lock` | `bun install --frozen-lockfile` |
+| pnpm | `pnpm-lock.yaml` | `pnpm install --frozen-lockfile` |
+| yarn | `yarn.lock` | `yarn install --frozen-lockfile` |
+| npm | `package.json` (fallback) | `npm ci` |
+| Python | `pyproject.toml` | `uv sync` |
+
 ## Setup
 
 ### Environment Variables

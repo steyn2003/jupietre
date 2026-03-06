@@ -35,6 +35,7 @@ async function installDeps(dir: string) {
     console.log(`[worktree] Installing Python dependencies with uv in ${dir}`);
     await exec("uv", ["sync"], { cwd: dir, timeout: 120_000 });
   }
+
 }
 
 async function run(cmd: string, args: string[], cwd?: string) {
