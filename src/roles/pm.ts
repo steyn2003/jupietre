@@ -8,6 +8,8 @@ import {
 } from "../tools/linear.js";
 import { STATUS } from "../statuses.js";
 
+const pmDoneState = process.env.PM_DONE_STATE || STATUS.IN_DEVELOPMENT;
+
 export const role: RoleConfig = {
   name: "pm",
   displayName: "Joseph",
@@ -37,7 +39,7 @@ export const role: RoleConfig = {
 
 8. **Coding prompt** — Append a 1-2 sentence prompt at the bottom of the description: [Action] [thing] in [location], [constraint].
 
-9. **Assign** — Move to "${STATUS.IN_DEVELOPMENT}" with linear_update_issue_state. Comment summarizing what was prepped.
+9. **Assign** — Move to "${pmDoneState}" with linear_update_issue_state. Comment summarizing what was prepped.
 
 ## Rules
 - Always append to description, never overwrite existing content.

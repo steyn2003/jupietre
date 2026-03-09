@@ -12,6 +12,8 @@ import {
 } from "../tools/linear.js";
 import { STATUS } from "../statuses.js";
 
+const doneState = process.env.ENGINEER_DONE_STATE || STATUS.IN_REVIEW;
+
 export const role: RoleConfig = {
   name: "engineer",
   displayName: "Pieter",
@@ -38,11 +40,11 @@ For each step, send the dev-agent a focused prompt for ONLY that step:
 ### 4. Verify & Ship
 - Dev-agent runs build/tests in the worktree. Fix failures one step at a time.
 - Push with git_push_branch, create PR with gh_create_pr (reference Linear issue, list completed steps).
-- Post PR link on Linear with linear_add_comment. Move ticket to "${STATUS.IN_REVIEW}" with linear_update_issue_state.
+- Post PR link on Linear with linear_add_comment. Move ticket to "${doneState}" with linear_update_issue_state.
 - Clean up with git_cleanup_worktree.
 
 ## On Failure
-Always create a PR, even if partial. Comment what's done and what's not. Move to "${STATUS.IN_REVIEW}".
+Always create a PR, even if partial. Comment what's done and what's not. Move to "${doneState}".
 
 ## Rules
 - No questions — make reasonable decisions and proceed.
