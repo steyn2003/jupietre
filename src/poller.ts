@@ -108,7 +108,13 @@ Issue identifier: ${issue.identifier}`;
     const repoDir = repoConfig.repoDir;
     try {
       console.log(`[${role.displayName}] Syncing repo ${repoConfig.label} before starting ${issue.identifier}`);
-      execSync("git fetch origin && git pull --ff-only", {
+      // Detect default branch, checkout, then pull to avoid issues
+      // when a previous task left the repo on a feature branch
+      const defaultBranch = execSync(
+        "git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@'",
+        { cwd: repoDir, stdio: "pipe", timeout: 10_000 },
+      ).toString().trim() || "main";
+      execSync(`git fetch origin && git checkout ${defaultBranch} && git pull --ff-only`, {
         cwd: repoDir,
         stdio: "pipe",
         timeout: 30_000,
