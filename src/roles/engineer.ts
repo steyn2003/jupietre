@@ -39,7 +39,7 @@ For each step, send the dev-agent a focused prompt for ONLY that step:
 
 ### 4. Verify & Ship
 - Dev-agent runs build/tests in the worktree. Fix failures one step at a time.
-- Push with git_push_branch, create PR with gh_create_pr (reference Linear issue, list completed steps).
+- Push with git_push_branch, create PR with gh_create_pr (reference Linear issue, list completed steps). Add a label: "bug" for bug fixes, "feature" for new features.
 - Post PR link on Linear with linear_add_comment. Move ticket to "${doneState}" with linear_update_issue_state.
 - Clean up with git_cleanup_worktree.
 

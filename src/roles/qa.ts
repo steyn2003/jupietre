@@ -49,6 +49,7 @@ export const role: RoleConfig = {
   },
   inProgressState: process.env.QA_IN_PROGRESS_STATE || STATUS.IN_REVIEW,
   doneState: process.env.QA_DONE_STATE || "Ready for Review",
+  autoMoveToDone: false,
   hasDevAgent: true,
   maxTurns: 20,
   model: "claude-sonnet-4-6",
