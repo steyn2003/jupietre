@@ -6,10 +6,14 @@ import { invokeAgent, type AgentResult } from "./agent.js";
 import { getRepoForIssue, getRepoLabels, type RepoConfig } from "./repos.js";
 import { STATUS } from "./statuses.js";
 import { tokenPool } from "./lib/token-pool.js";
-import { isWithinSchedule, getScheduleDescription, msUntilNextWindow } from "./lib/schedule.js";
+import {
+  isWithinSchedule,
+  getScheduleDescription,
+  msUntilNextWindow,
+} from "./lib/schedule.js";
 
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS) || 2 * 60 * 1000;
-const MAX_CONCURRENT = Number(process.env.MAX_CONCURRENT) || 1;
+const MAX_CONCURRENT = Number(process.env.MAX_CONCURRENT) || 2;
 
 /** Issues currently being worked on — prevents double-pickup */
 const activeIssues = new Set<string>();
@@ -19,7 +23,9 @@ async function poll(role: RoleConfig) {
   if (!isWithinSchedule()) {
     const waitMs = msUntilNextWindow();
     const waitMin = Math.round(waitMs / 60_000);
-    console.log(`[${role.displayName}] Outside work schedule — next window in ~${waitMin}m`);
+    console.log(
+      `[${role.displayName}] Outside work schedule — next window in ~${waitMin}m`,
+    );
     return;
   }
 
