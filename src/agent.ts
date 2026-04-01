@@ -5,6 +5,7 @@ import {
   type SubagentStopHookInput,
 } from "@anthropic-ai/claude-agent-sdk";
 import { traceAgent } from "./lib/tracing.js";
+import { tokenPool } from "./lib/token-pool.js";
 import type { RoleConfig } from "./roles/index.js";
 
 export interface AgentResult {
@@ -88,6 +89,19 @@ export async function invokeAgent(
     prompt,
     { role: role.name, displayName: role.displayName },
     async () => {
+      // Acquire a token from the pool and apply it to the environment
+      const poolToken = tokenPool.acquire();
+      if (!poolToken) {
+        return {
+          text: "Error: All tokens exhausted (daily limit reached)",
+          costUsd: 0,
+          numTurns: 0,
+          durationMs: 0,
+        };
+      }
+      tokenPool.applyToEnv(poolToken);
+      console.log(`[agent] Using token ${poolToken.masked} for ${role.displayName}`);
+
       let resultText = "";
       let costUsd = 0;
       let numTurns = 0;
@@ -184,6 +198,9 @@ export async function invokeAgent(
           throw err;
         }
       }
+
+      // Record token usage
+      tokenPool.recordUsage(poolToken, costUsd);
 
       // Restore env
       if (prevRepo !== undefined) process.env.GITHUB_REPO = prevRepo;
