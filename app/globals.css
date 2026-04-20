@@ -1,0 +1,269 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Design tokens. Everything visual flows from here — change a CSS var, the
+   whole app re-themes. Surfaces are layered (0 = page, 1 = card, 2 = elevated)
+   so depth comes from value, not from box-shadow.
+   --------------------------------------------------------------------------- */
+:root {
+  /* surfaces */
+  --bg: #0b0b0c;
+  --surface-1: #131316;
+  --surface-2: #1a1a1f;
+  --surface-3: #232329;
+
+  /* text */
+  --fg: #ededee;
+  --fg-muted: #a1a1a8;
+  --fg-subtle: #6b6b73;
+
+  /* hairlines (rgba on top of any surface) */
+  --border-hairline: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.12);
+  --border-focus: rgba(91, 141, 239, 0.55);
+
+  /* brand accent — single source. Soft = 12% alpha tint for backgrounds. */
+  --accent: #5b8def;
+  --accent-fg: #ffffff;
+  --accent-soft: rgba(91, 141, 239, 0.14);
+  --accent-strong: #79a3ff;
+
+  /* status */
+  --success: #34d399;
+  --success-soft: rgba(52, 211, 153, 0.14);
+  --warning: #f5b742;
+  --warning-soft: rgba(245, 183, 66, 0.14);
+  --danger: #f26d6d;
+  --danger-soft: rgba(242, 109, 109, 0.14);
+
+  /* motion — Apple/Linear-style spring + smooth out */
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* depth — diffused, tinted to bg, never harsh black */
+  --shadow-soft: 0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  --shadow-pop: 0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 16px 48px -16px rgba(0, 0, 0, 0.7);
+  --shadow-inset-hi: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+@theme inline {
+  /* color tokens — exposed as Tailwind utilities (bg-bg, text-fg, etc.) */
+  --color-bg: var(--bg);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+
+  --color-hairline: var(--border-hairline);
+  --color-strong: var(--border-strong);
+
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-strong: var(--accent-strong);
+
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+
+  /* legacy aliases — keep existing pages compiling while we migrate them.
+     New code should prefer bg/fg/surface-* / hairline / fg-muted. */
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+  --color-muted: var(--fg-muted);
+  --color-border: var(--border-hairline);
+  --color-card: var(--surface-1);
+  --color-accent-foreground: var(--accent-fg);
+
+  /* radius scale — squircle-friendly, used on cards/buttons consistently */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius-2xl: 28px;
+
+  /* fonts — wired in layout.tsx via next/font, exposed as font-sans / font-mono */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo,
+    Consolas, monospace;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11", "cv02";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  padding-top: env(safe-area-inset-top);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  margin-bottom: env(keyboard-inset-height, 0px);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* numbers/code/identifiers default to mono with tabular figures */
+code,
+kbd,
+samp,
+pre,
+.font-mono {
+  font-feature-settings: "ss01", "cv11", "tnum";
+}
+
+input,
+textarea,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+input,
+textarea {
+  background: transparent;
+  font-size: max(16px, 1em);
+}
+
+/* Selection picks up brand color so it doesn't feel system-default */
+::selection {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+
+/* Focus rings are visible but never harsh — wrap inputs/buttons in this */
+:where(button, a, input, textarea, select):focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Skeleton shimmer — used by <Skeleton /> primitive */
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Streaming caret — pulses on the last assistant message while the agent
+   is still producing tokens. */
+@keyframes caret-blink {
+  0%, 60% { opacity: 1; }
+  61%, 100% { opacity: 0; }
+}
+
+/* ---------------------------------------------------------------------------
+   Agent message typography. Scoped under `.prose-msg` so it can't leak into
+   the rest of the UI. Pairs with <Markdown /> in components/chat. All values
+   derive from design tokens — change tokens, chat re-styles.
+   --------------------------------------------------------------------------- */
+.prose-msg {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--fg);
+}
+.prose-msg > *:first-child { margin-top: 0; }
+.prose-msg > *:last-child { margin-bottom: 0; }
+.prose-msg p { margin: 0.6em 0; }
+.prose-msg h1, .prose-msg h2, .prose-msg h3, .prose-msg h4 {
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  margin: 1.1em 0 0.5em;
+  color: var(--fg);
+}
+.prose-msg h1 { font-size: 1.35em; }
+.prose-msg h2 { font-size: 1.18em; }
+.prose-msg h3 { font-size: 1.05em; }
+.prose-msg h4 { font-size: 1em; color: var(--fg-muted); }
+.prose-msg ul, .prose-msg ol { margin: 0.5em 0; padding-left: 1.4em; }
+.prose-msg ul { list-style: disc; }
+.prose-msg ol { list-style: decimal; }
+.prose-msg li { margin: 0.2em 0; }
+.prose-msg li::marker { color: var(--fg-subtle); }
+.prose-msg li > p { margin: 0.2em 0; }
+.prose-msg blockquote {
+  border-left: 2px solid var(--border-strong);
+  padding-left: 0.9em;
+  margin: 0.6em 0;
+  color: var(--fg-muted);
+}
+.prose-msg hr {
+  border: 0;
+  border-top: 1px solid var(--border-hairline);
+  margin: 1.2em 0;
+}
+.prose-msg strong { color: var(--fg); font-weight: 600; }
+.prose-msg em { font-style: italic; }
+.prose-msg del { color: var(--fg-subtle); }
+.prose-msg table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  font-size: 0.9em;
+}
+.prose-msg th, .prose-msg td {
+  border-bottom: 1px solid var(--border-hairline);
+  padding: 0.45em 0.7em;
+  text-align: left;
+}
+.prose-msg th { color: var(--fg-subtle); font-weight: 500; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.08em; }
+.prose-msg input[type="checkbox"] { accent-color: var(--accent); margin-right: 0.4em; }
+
+/* highlight.js tokens — warm, desaturated, dark-theme. Scoped to block code. */
+.prose-msg .hljs { background: transparent; color: var(--fg); }
+.prose-msg .hljs-comment,
+.prose-msg .hljs-quote { color: var(--fg-subtle); font-style: italic; }
+.prose-msg .hljs-keyword,
+.prose-msg .hljs-selector-tag,
+.prose-msg .hljs-literal,
+.prose-msg .hljs-section,
+.prose-msg .hljs-link { color: #c792ea; }
+.prose-msg .hljs-string,
+.prose-msg .hljs-attr,
+.prose-msg .hljs-meta-string { color: #9dd693; }
+.prose-msg .hljs-number,
+.prose-msg .hljs-symbol,
+.prose-msg .hljs-bullet,
+.prose-msg .hljs-regexp { color: #f78c6c; }
+.prose-msg .hljs-variable,
+.prose-msg .hljs-template-variable,
+.prose-msg .hljs-tag,
+.prose-msg .hljs-name,
+.prose-msg .hljs-attribute { color: #ffcb6b; }
+.prose-msg .hljs-title,
+.prose-msg .hljs-title.class_,
+.prose-msg .hljs-title.function_,
+.prose-msg .hljs-built_in,
+.prose-msg .hljs-class .hljs-title { color: #82aaff; }
+.prose-msg .hljs-type,
+.prose-msg .hljs-params { color: #ffcb6b; }
+.prose-msg .hljs-meta { color: var(--fg-muted); }
+.prose-msg .hljs-deletion { background: rgba(242, 109, 109, 0.12); }
+.prose-msg .hljs-addition { background: rgba(52, 211, 153, 0.12); }
+.prose-msg .hljs-emphasis { font-style: italic; }
+.prose-msg .hljs-strong { font-weight: 600; }
+
+/* Honor reduced-motion globally — framer-motion respects this too */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

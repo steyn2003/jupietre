@@ -1,0 +1,14 @@
+{$APP_DOMAIN} {
+	encode zstd gzip
+
+	# SSE: don't buffer — clients need server-pushed events as they happen.
+	@sse path /api/sessions/*/stream
+	reverse_proxy @sse web:3000 {
+		flush_interval -1
+	}
+
+	reverse_proxy web:3000
+
+	# Long-running uploads / agent turns can take minutes; bump request timeouts.
+	# (Caddy has no global request body timeout; this is the per-handler default.)
+}

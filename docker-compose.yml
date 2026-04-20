@@ -1,36 +1,71 @@
 services:
-  pm:
-    build: .
-    container_name: agent-pm
+  postgres:
+    image: postgres:17-alpine
+    container_name: jupietre-postgres
     restart: unless-stopped
-    env_file: .env
     environment:
-      AGENT_ROLE: pm
+      POSTGRES_USER: ${POSTGRES_USER:-jupietre}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jupietre}
+      POSTGRES_DB: ${POSTGRES_DB:-jupietre}
+    ports:
+      # Exposed so `bun run db:push` and host-side dev tooling can connect.
+      - "11112:5432"
     volumes:
-      - repo-data:/data
-      - ${CLAUDE_CREDENTIALS:-~/.claude/.credentials.json}:/home/node/.claude/.credentials.json:ro
+      - jupietre-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-jupietre} -d ${POSTGRES_DB:-jupietre}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
-  engineer:
-    build: .
-    container_name: agent-engineer
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: jupietre-web
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     env_file: .env
+    ports:
+      # Direct host access for local dev — bypasses Caddy/HTTPS.
+      # In Dokploy/prod, traffic enters via Traefik on 443 instead.
+      - "3000:3000"
     environment:
-      AGENT_ROLE: engineer
+      # Inside the compose network, talk to postgres by service name.
+      POSTGRES_URL: postgres://${POSTGRES_USER:-jupietre}:${POSTGRES_PASSWORD:-jupietre}@postgres:5432/${POSTGRES_DB:-jupietre}
+      REPOS_BASE_DIR: /data/repos
+      # Where per-session worktrees + Jupietre-managed state live.
+      DATA_DIR: /app/data
     volumes:
-      - repo-data:/data
-      - ${CLAUDE_CREDENTIALS:-~/.claude/.credentials.json}:/home/node/.claude/.credentials.json:ro
+      - jupietre-repos:/data/repos
+      # Per-session worktrees and any other Jupietre state live here.
+      - jupietre-data:/app/data
+      # Persist `gh auth login` between restarts.
+      - jupietre-gh-config:/home/app/.config/gh
 
-  tester:
-    build: .
-    container_name: agent-tester
+  caddy:
+    image: caddy:2-alpine
+    container_name: jupietre-caddy
     restart: unless-stopped
-    env_file: .env
+    depends_on:
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
     environment:
-      AGENT_ROLE: tester
+      APP_DOMAIN: ${APP_DOMAIN}
     volumes:
-      - repo-data:/data
-      - ${CLAUDE_CREDENTIALS:-~/.claude/.credentials.json}:/home/node/.claude/.credentials.json:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - jupietre-caddy-data:/data
+      - jupietre-caddy-config:/config
 
 volumes:
-  repo-data:
+  jupietre-postgres-data:
+  jupietre-repos:
+  jupietre-data:
+  jupietre-gh-config:
+  jupietre-caddy-data:
+  jupietre-caddy-config:

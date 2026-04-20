@@ -1,0 +1,14 @@
+.git
+.next
+node_modules
+.env
+.env.*
+!.env.example
+.planning
+docs
+src
+tests
+*.log
+.DS_Store
+.vscode
+.idea

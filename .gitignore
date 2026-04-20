@@ -1,4 +1,61 @@
+# ─── Dependencies ─────────────────────────────────────────────
 node_modules/
+.pnp/
+.pnp.js
+.pnp.cjs
+.yarn/cache/
+.yarn/install-state.gz
+
+# ─── Build output ─────────────────────────────────────────────
+.next/
 dist/
+out/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# ─── Test / coverage ─────────────────────────────────────────
+coverage/
+.nyc_output/
+
+# ─── Runtime / data ──────────────────────────────────────────
+# Per-session worktrees, cloned target repos, postgres dumps, etc.
+data/
+
+# ─── Secrets ─────────────────────────────────────────────────
+# Match any local env file. Only `.env.example` and `.env*.example` are
+# committed — those are templates with no real secrets.
 .env
+.env.*
+!.env.example
+!.env*.example
+*.pem
+*.key
+secrets/
+
+# ─── Editor / OS ─────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# ─── Tooling caches ──────────────────────────────────────────
 .claude/
+.eslintcache
+.turbo/
+.cache/
+
+# ─── Logs ────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ─── Misc ────────────────────────────────────────────────────
+*.tgz
+.vercel/
