@@ -68,6 +68,9 @@ RUN su app -s /bin/sh -c "git config --global safe.directory '*'"
 COPY --from=builder --chown=app:app /app/.next/standalone ./
 COPY --from=builder --chown=app:app /app/.next/static ./.next/static
 COPY --from=builder --chown=app:app /app/public ./public
+# Drizzle migration SQL — read at boot by lib/db/migrate.ts. Standalone build
+# doesn't auto-include these because they're plain .sql files.
+COPY --from=builder --chown=app:app /app/lib/db/migrations ./lib/db/migrations
 
 USER app
 

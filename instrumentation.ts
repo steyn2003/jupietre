@@ -4,6 +4,18 @@ export async function register() {
   const { loadEnv } = await import("@/lib/env");
   loadEnv();
 
+  // Apply pending DB migrations before anything reads the schema. On a fresh
+  // Dokploy database this is what creates the tables; on subsequent boots
+  // it's a no-op. Failure here is fatal — bootstrap and the poller would
+  // crash anyway with "relation does not exist" if the schema is missing.
+  const { runMigrations } = await import("@/lib/db/migrate");
+  try {
+    await runMigrations();
+  } catch (err) {
+    console.error("[db] Migration failed — refusing to start:", err);
+    throw err;
+  }
+
   const { ensureAdminUser } = await import("@/lib/auth/bootstrap");
   await ensureAdminUser().catch((err) => {
     console.error("[auth] Admin bootstrap failed:", err);
