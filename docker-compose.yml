@@ -1,3 +1,13 @@
+# Production / Dokploy compose. Local-dev port bindings + Caddy live in
+# docker-compose.override.yml (auto-merged by `docker compose` locally,
+# ignored by Dokploy which deploys this file as-is).
+#
+# In Dokploy:
+#   - Traefik (Dokploy's built-in reverse proxy) handles TLS + routing.
+#     Configure the route → web:3000 in the Dokploy UI; no host ports needed.
+#   - Set env vars (POSTGRES_URL is overridden by env_file/.env, etc.) in
+#     the Dokploy "Environment" panel rather than committing them.
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -7,9 +17,6 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-jupietre}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jupietre}
       POSTGRES_DB: ${POSTGRES_DB:-jupietre}
-    ports:
-      # Exposed so `bun run db:push` and host-side dev tooling can connect.
-      - "11112:5432"
     volumes:
       - jupietre-postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -28,10 +35,8 @@ services:
       postgres:
         condition: service_healthy
     env_file: .env
-    ports:
-      # Direct host access for local dev — bypasses Caddy/HTTPS.
-      # In Dokploy/prod, traffic enters via Traefik on 443 instead.
-      - "3000:3000"
+    expose:
+      - "3000"
     environment:
       # Inside the compose network, talk to postgres by service name.
       POSTGRES_URL: postgres://${POSTGRES_USER:-jupietre}:${POSTGRES_PASSWORD:-jupietre}@postgres:5432/${POSTGRES_DB:-jupietre}
@@ -40,32 +45,11 @@ services:
       DATA_DIR: /app/data
     volumes:
       - jupietre-repos:/data/repos
-      # Per-session worktrees and any other Jupietre state live here.
       - jupietre-data:/app/data
-      # Persist `gh auth login` between restarts.
       - jupietre-gh-config:/home/app/.config/gh
-
-  caddy:
-    image: caddy:2-alpine
-    container_name: jupietre-caddy
-    restart: unless-stopped
-    depends_on:
-      - web
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    environment:
-      APP_DOMAIN: ${APP_DOMAIN}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - jupietre-caddy-data:/data
-      - jupietre-caddy-config:/config
 
 volumes:
   jupietre-postgres-data:
   jupietre-repos:
   jupietre-data:
   jupietre-gh-config:
-  jupietre-caddy-data:
-  jupietre-caddy-config:
