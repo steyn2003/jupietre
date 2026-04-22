@@ -72,6 +72,10 @@ COPY --from=builder --chown=app:app /app/public ./public
 # doesn't auto-include these because they're plain .sql files.
 COPY --from=builder --chown=app:app /app/lib/db/migrations ./lib/db/migrations
 
+# Platform skills — loaded by the Agent SDK via settingSources: ["user"] and
+# available to every session regardless of which target repo it operates on.
+COPY --chown=app:app skills/ /home/app/.claude/skills/
+
 USER app
 
 EXPOSE 3000

@@ -29,7 +29,7 @@ export function buildSdkOptionsFromConfig(
     systemPrompt: c.systemPrompt,
     maxTurns: c.maxTurns,
     effort: c.effort,
-    settingSources: c.includeProjectSkills ? ["project"] : [],
+    settingSources: c.includeProjectSkills ? ["user", "project"] : ["user"],
   };
   if (!enforceApproval) {
     opts.permissionMode = "bypassPermissions";
