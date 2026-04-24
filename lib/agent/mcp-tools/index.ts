@@ -7,6 +7,7 @@ import type { AgentConfig } from "@/lib/db/agent-configs";
 import { graphPath, hasGraph } from "@/lib/graphify/manager";
 import { buildGithubTools } from "./github";
 import { buildLinearTools } from "./linear";
+import { buildWorkflowTools } from "./workflow";
 
 export function buildMcpServersForSession(params: {
   sessionId: string;
@@ -15,8 +16,12 @@ export function buildMcpServersForSession(params: {
    *  Distinct from `repoPath`, which is the per-session worktree. */
   clonePath: string | null;
   agent: AgentConfig;
+  /** M12: when set, this session belongs to a workflow run. The workflow_*
+   *  MCP tools are only registered in that case — sessions outside a run
+   *  shouldn't see them at all. */
+  workflowRunId?: string | null;
 }): Record<string, McpServerConfig> | undefined {
-  const { sessionId, repoPath, clonePath, agent } = params;
+  const { sessionId, repoPath, clonePath, agent, workflowRunId } = params;
   const servers: Record<string, McpServerConfig> = {};
 
   if (agent.enableLinearTools === 1 && process.env.LINEAR_API_KEY) {
@@ -32,6 +37,14 @@ export function buildMcpServersForSession(params: {
       name: "jupietre-github",
       version: "1.0.0",
       tools: buildGithubTools(sessionId, repoPath),
+    });
+  }
+
+  if (workflowRunId) {
+    servers.workflow = createSdkMcpServer({
+      name: "jupietre-workflow",
+      version: "1.0.0",
+      tools: buildWorkflowTools(sessionId),
     });
   }
 

@@ -444,6 +444,7 @@ export async function startTurn(params: {
         repoPath: cwd,
         clonePath,
         agent: config,
+        workflowRunId: row.workflowRunId,
       });
       if (mcpServers) options.mcpServers = mcpServers;
 
