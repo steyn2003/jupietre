@@ -6,7 +6,6 @@ node_modules
 !.env.example
 .planning
 docs
-src
 tests
 *.log
 .DS_Store

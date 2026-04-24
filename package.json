@@ -6,8 +6,6 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "poller": "tsx src/index.ts",
-    "poller:build": "tsc -p tsconfig.poller.json",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push"
   },
