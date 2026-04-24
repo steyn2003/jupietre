@@ -48,6 +48,10 @@ Thumbs.db
 .eslintcache
 .turbo/
 .cache/
+# graphify's tree-sitter incremental cache — rebuilt locally by
+# `graphify update`; the committed graph.json is the only artifact
+# the runtime reads.
+graphify-out/cache/
 
 # ─── Logs ────────────────────────────────────────────────────
 *.log
