@@ -21,8 +21,9 @@ import { nanoid } from "nanoid";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { db } from "@/lib/db/client";
-import { sessionMessages, sessions } from "@/lib/db/schema";
+import { repos, sessionMessages, sessions } from "@/lib/db/schema";
 import { recordArtifact } from "@/lib/db/artifacts";
+import { refreshGraph } from "@/lib/graphify/manager";
 
 const execFileAsync = promisify(execFile);
 
@@ -387,6 +388,27 @@ export async function startTurn(params: {
       // rows (pre-M9) fall back to repoPath so they keep working unchanged.
       const cwd = row.worktreePath ?? row.repoPath;
 
+      // Resolve the base clone path — graphify lives there, not in the per-
+      // session worktree. Sessions from M11+ carry `repoId`; older ones
+      // stored the clone path directly in `repoPath` (no worktree existed).
+      let clonePath: string | null = null;
+      if (row.repoId) {
+        const repoRow = await db
+          .select({ clonePath: repos.clonePath })
+          .from(repos)
+          .where(eq(repos.id, row.repoId))
+          .limit(1);
+        clonePath = repoRow[0]?.clonePath ?? null;
+      }
+      if (!clonePath && !row.worktreePath) clonePath = row.repoPath;
+
+      // Refresh the knowledge graph before the agent starts. Deduped per-clone:
+      // if a previous turn / registerRepo is still building, this awaits the
+      // same Promise rather than kicking a second graphify process.
+      if (clonePath) {
+        await refreshGraph(clonePath);
+      }
+
       // Capture baseSha on the very first turn so we can diff at finish time.
       let baseSha = row.baseSha ?? null;
       if (!baseSha) {
@@ -428,6 +450,7 @@ export async function startTurn(params: {
       const mcpServers = buildMcpServersForSession({
         sessionId,
         repoPath: cwd,
+        clonePath,
         agent: config,
       });
       if (mcpServers) options.mcpServers = mcpServers;

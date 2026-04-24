@@ -9,6 +9,7 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { repos } from "@/lib/db/schema";
 import { resolveDataDir } from "@/lib/worktrees/manager";
+import { refreshGraph } from "@/lib/graphify/manager";
 
 const execFileP = promisify(execFile);
 
@@ -164,6 +165,12 @@ export async function registerRepo(
     })
     .returning();
   if (!row) throw new RepoError("Insert returned no row", 500);
+
+  // Kick off the graphify index build in the background. First build on a
+  // large repo takes minutes; we don't block the HTTP response. If a session
+  // starts before the build completes, the runner awaits the same Promise.
+  void refreshGraph(clonePath);
+
   return row;
 }
 
@@ -187,6 +194,9 @@ export async function fetchRepo(repo: Repo): Promise<void> {
   } catch (err) {
     console.warn(`[repo] fetch failed for ${repo.slug}:`, err);
   }
+  // Upstream moved; rebuild the graph in the background so the next session
+  // sees fresh structure. Deduped per-clonePath inside refreshGraph.
+  void refreshGraph(repo.clonePath);
 }
 
 export async function listAllRepos(): Promise<Repo[]> {
