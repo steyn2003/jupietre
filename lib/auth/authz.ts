@@ -6,6 +6,7 @@ import {
   repos,
   sessions,
   teamMembers,
+  workflows,
 } from "@/lib/db/schema";
 
 /**
@@ -146,6 +147,44 @@ export async function canEditRepo(
 export function visibleReposWhere(userId: string, myTeamIds: string[]) {
   if (myTeamIds.length === 0) return eq(repos.userId, userId);
   return or(eq(repos.userId, userId), inArray(repos.teamId, myTeamIds));
+}
+
+// ────────────────────────────────────────────────────────────────────
+// M12 — Workflows (definitions) and workflow runs. Same ACL shape as
+// agent_configs: `ownerId` + optional `teamId`. Team members can read
+// and run team-scoped workflows; only team owners edit/delete them.
+// ────────────────────────────────────────────────────────────────────
+
+export interface WorkflowACL {
+  ownerId: string;
+  teamId: string | null;
+}
+
+export function canUseWorkflow(
+  userId: string,
+  w: WorkflowACL,
+  myTeamIds: Set<string>,
+): boolean {
+  if (w.ownerId === userId) return true;
+  if (w.teamId && myTeamIds.has(w.teamId)) return true;
+  return false;
+}
+
+export async function canEditWorkflow(
+  userId: string,
+  w: WorkflowACL,
+): Promise<boolean> {
+  if (w.ownerId === userId && w.teamId === null) return true;
+  if (w.teamId) return isTeamOwner(userId, w.teamId);
+  return false;
+}
+
+export function visibleWorkflowsWhere(userId: string, myTeamIds: string[]) {
+  if (myTeamIds.length === 0) return eq(workflows.ownerId, userId);
+  return or(
+    eq(workflows.ownerId, userId),
+    inArray(workflows.teamId, myTeamIds),
+  );
 }
 
 /** Convenience for routes — load + decide in one call. Returns null on no-access. */
