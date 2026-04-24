@@ -38,7 +38,8 @@ export function buildMcpServersForSession(params: {
   // graphify: read-only knowledge-graph queries backed by
   // `<clonePath>/graphify-out/graph.json`. Auto-registered whenever the graph
   // exists — it's strictly additive (no LLM at query time) so we don't gate
-  // it behind a per-agent toggle. Build is triggered from lib/repos/manager.
+  // it behind a per-agent toggle. The graph is built + committed by the
+  // operator on their own machine; the server never runs `graphify update`.
   if (clonePath && hasGraph(clonePath)) {
     servers.graphify = {
       type: "stdio",

@@ -23,7 +23,6 @@ import { promisify } from "node:util";
 import { db } from "@/lib/db/client";
 import { repos, sessionMessages, sessions } from "@/lib/db/schema";
 import { recordArtifact } from "@/lib/db/artifacts";
-import { refreshGraph } from "@/lib/graphify/manager";
 
 const execFileAsync = promisify(execFile);
 
@@ -401,13 +400,6 @@ export async function startTurn(params: {
         clonePath = repoRow[0]?.clonePath ?? null;
       }
       if (!clonePath && !row.worktreePath) clonePath = row.repoPath;
-
-      // Refresh the knowledge graph before the agent starts. Deduped per-clone:
-      // if a previous turn / registerRepo is still building, this awaits the
-      // same Promise rather than kicking a second graphify process.
-      if (clonePath) {
-        await refreshGraph(clonePath);
-      }
 
       // Capture baseSha on the very first turn so we can diff at finish time.
       let baseSha = row.baseSha ?? null;
