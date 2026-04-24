@@ -10,6 +10,7 @@ import {
   UsersThreeIcon,
   SignOutIcon,
   GitBranchIcon,
+  FlowArrowIcon,
 } from "@phosphor-icons/react";
 import { cn } from "@/components/ui/cn";
 
@@ -39,6 +40,12 @@ const NAV: NavItem[] = [
     label: "Repos",
     icon: <GitBranchIcon weight="regular" />,
     matchPrefix: "/repos",
+  },
+  {
+    href: "/workflows",
+    label: "Workflows",
+    icon: <FlowArrowIcon weight="regular" />,
+    matchPrefix: "/workflow",
   },
   {
     href: "/usage",
