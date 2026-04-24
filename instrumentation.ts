@@ -23,4 +23,9 @@ export async function register() {
 
   const { startLinearPoller } = await import("@/lib/linear/poller");
   startLinearPoller();
+
+  const { startWorkflowDispatcher } = await import(
+    "@/lib/workflows/dispatcher"
+  );
+  startWorkflowDispatcher();
 }

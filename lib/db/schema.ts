@@ -198,8 +198,11 @@ export const sessions = pgTable(
     repoId: text("repo_id").references(() => repos.id, {
       onDelete: "set null",
     }),
-    /** Where the session came from — manual UI or the Linear poller */
-    source: text("source", { enum: ["ui", "linear"] }).notNull().default("ui"),
+    /** Where the session came from — manual UI, the Linear poller, or the
+     *  workflow dispatcher (M12). */
+    source: text("source", { enum: ["ui", "linear", "workflow"] })
+      .notNull()
+      .default("ui"),
     /** Linear issue identifier (e.g. "ENG-123") when source=linear */
     linearIssueId: text("linear_issue_id"),
     /** The Claude Agent SDK session id so we can `resume` across turns */
