@@ -8,6 +8,13 @@
       "when": 1776713801659,
       "tag": "0000_confused_the_fallen",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1777039086696,
+      "tag": "0001_amazing_electro",
+      "breakpoints": true
     }
   ]
 }

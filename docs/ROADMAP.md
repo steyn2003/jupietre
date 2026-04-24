@@ -115,6 +115,16 @@ Repos move from env (`GITHUB_REPOS`) to a first-class `repos` table with own/tea
 
 ---
 
+### M12 — Agent workflows (configurable multi-agent flows) 📋 planned
+
+Agents hand work to each other as **messages between colleagues**, not context dumps. Each handoff is a small structured payload (note + optional files/DoD/refs) — the receiving agent looks up anything else it needs via existing tools (`gh pr diff`, `linear_get_issue`, `git log`). Triangle DAG ships on day one (PM → Eng → QA, with reject loops and clarifying asks), but **flows themselves are DB entities** — a `/workflows` UI lets users compose new flows from their configured agents as they add more.
+
+Schema: `workflows` (definition JSON, zod-validated), `workflow_runs` (per-execution state), `workflow_messages` (the inter-agent mailbox + event log), and a nullable `sessions.workflowRunId`. Dispatcher is an in-process poller (same pattern as `startLinearPoller`) that picks up pending messages, creates a new session OR resumes the existing one (via `queueFollowUp` + SDK `resume`), and calls `startTurn`. Agents participate through four new MCP tools: `workflow_handoff`, `workflow_ask`, `workflow_answer`, `workflow_complete`. Triggers from UI/API initially; Linear adapter comes later. Existing Linear pipeline untouched — workflow runs are a parallel path.
+
+Plan: [`docs/superpowers/plans/2026-04-24-agent-workflows.md`](./superpowers/plans/2026-04-24-agent-workflows.md)
+
+---
+
 ## Explicitly out of scope
 
 Decisions made deliberately — reopen only with a strong reason.

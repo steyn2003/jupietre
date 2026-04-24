@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { users } from "@/lib/db/schema";
 import { ensureBuiltInAgentConfigs } from "@/lib/db/agent-configs";
+import { ensureBuiltInWorkflows } from "@/lib/workflows/runs";
 import { seedReposFromEnv } from "@/lib/repos/manager";
 import { hashPassword } from "./password";
 
@@ -43,6 +44,7 @@ export async function ensureAdminUser(): Promise<void> {
   }
 
   await ensureBuiltInAgentConfigs(userId);
+  await ensureBuiltInWorkflows(userId);
 
   // Seed repos from GITHUB_REPOS env in the background — clones can take
   // seconds and we don't want to block the request that triggered bootstrap.

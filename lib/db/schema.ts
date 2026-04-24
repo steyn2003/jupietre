@@ -230,6 +230,15 @@ export const sessions = pgTable(
     parentSessionId: text("parent_session_id"),
     /** indexInSession of the parent message the fork branched off from. */
     forkedAtMessageIndex: integer("forked_at_message_index"),
+    /** M12: when set, this session is participating in a workflow run. Null for
+     *  standalone UI sessions and Linear-picked sessions. The workflow dispatcher
+     *  owns the lifecycle (new session vs resume via queueFollowUp). */
+    workflowRunId: text("workflow_run_id"),
+    /** M12: the node slug (within the workflow's definition) this session is
+     *  serving. Unique per (workflowRunId, nodeSlug) in practice — that
+     *  uniqueness is what the dispatcher uses to decide "new session vs resume
+     *  existing session" when routing a message. */
+    workflowNodeSlug: text("workflow_node_slug"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
@@ -240,6 +249,11 @@ export const sessions = pgTable(
     index("sessions_linear_issue_idx").on(t.linearIssueId),
     index("sessions_linear_agent_idx").on(t.linearIssueId, t.agentConfigId),
     index("sessions_parent_idx").on(t.parentSessionId),
+    index("sessions_workflow_run_idx").on(t.workflowRunId),
+    index("sessions_workflow_run_node_idx").on(
+      t.workflowRunId,
+      t.workflowNodeSlug,
+    ),
   ],
 );
 
@@ -344,4 +358,139 @@ export const sessionMessages = pgTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (t) => [index("session_messages_session_idx_idx").on(t.sessionId, t.indexInSession)],
+);
+
+// ────────────────────────────────────────────────────────────────────
+// M12 — Agent workflows
+//
+// Workflows are user-configurable DAGs of agents. A `workflows` row holds the
+// definition (nodes + transitions + limits) as validated JSON. A `workflow_runs`
+// row is one execution of a workflow. Agents hand work to each other by
+// publishing `workflow_messages` (the inter-agent mailbox); the in-process
+// dispatcher drains pending messages, creates or resumes sessions accordingly,
+// and calls startTurn / queueFollowUp.
+//
+// Handoffs carry a short message payload, not a transcript — receivers look up
+// any extra context they need via existing tools (gh pr diff, linear_get_issue,
+// git log). See docs/superpowers/plans/2026-04-24-agent-workflows.md.
+// ────────────────────────────────────────────────────────────────────
+
+export const workflows = pgTable(
+  "workflows",
+  {
+    id: text("id").primaryKey(),
+    /** Owner. Same model as agent_configs — own workflows + optional team scope. */
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** When set, anyone on the team can read/run this workflow. */
+    teamId: text("team_id").references(() => teams.id, { onDelete: "set null" }),
+    /** Stable short label, unique per (ownerId, teamId) scope. */
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    /** { nodes, transitions, limits } — validated by lib/workflows/definitions.ts
+     *  on every write. Node.agentConfigId references agent_configs.id; the FK is
+     *  enforced at app level because it lives inside the JSON doc. */
+    definition: jsonb("definition")
+      .$type<Record<string, unknown>>()
+      .notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("workflows_owner_slug_idx").on(t.ownerId, t.slug)],
+);
+
+export const workflowRuns = pgTable(
+  "workflow_runs",
+  {
+    id: text("id").primaryKey(),
+    workflowId: text("workflow_id")
+      .notNull()
+      .references(() => workflows.id, { onDelete: "restrict" }),
+    /** running: dispatcher is actively moving the run forward.
+     *  awaiting: a node owes an answer/handoff; no work pending.
+     *  done:    completed successfully via workflow_complete.
+     *  error:   dispatcher aborted (budget cap, DAG violation, broken agent ref). */
+    status: text("status", {
+      enum: ["running", "awaiting", "done", "error"],
+    })
+      .notNull()
+      .default("running"),
+    /** Repo the run operates on. Every spawned session inherits this. */
+    repoId: text("repo_id")
+      .notNull()
+      .references(() => repos.id, { onDelete: "restrict" }),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Copied from the workflow at run-start — lets team members see runs they
+     *  kicked off on a team-scoped workflow. */
+    teamId: text("team_id").references(() => teams.id, { onDelete: "set null" }),
+    /** Reserved for a later phase where a Linear ticket triggers a workflow
+     *  run instead of a bare session. Always null for now. */
+    linearIssueId: text("linear_issue_id"),
+    /** Node slug (within the workflow's definition.nodes) whose turn it is
+     *  right now. Advanced by the dispatcher on each delivered message. */
+    currentNode: text("current_node").notNull(),
+    /** Free-form run context — initial goal string, any shared state the DAG
+     *  wants to thread through. { goal: string, error?: string, ... }. */
+    contextJson: jsonb("context_json")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [
+    index("workflow_runs_workflow_idx").on(t.workflowId),
+    index("workflow_runs_owner_idx").on(t.ownerId),
+    index("workflow_runs_status_idx").on(t.status),
+  ],
+);
+
+export const workflowMessages = pgTable(
+  "workflow_messages",
+  {
+    id: text("id").primaryKey(),
+    workflowRunId: text("workflow_run_id")
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: "cascade" }),
+    /** Null for the initial trigger; otherwise the node slug that sent this. */
+    fromNode: text("from_node"),
+    toNode: text("to_node").notNull(),
+    /** trigger: start the run (dispatcher-internal).
+     *  handoff: A → B, new session for B.
+     *  ask:     A → B, new session for B with a question.
+     *  answer:  B → A, resumes A's existing session via queueFollowUp.
+     *  reject:  A → B, resumes B's existing session with rework notes.
+     *  complete: any → (no target), closes the run. */
+    kind: text("kind", {
+      enum: ["trigger", "handoff", "ask", "answer", "reject", "complete"],
+    }).notNull(),
+    /** For handoff: HandoffPayload shape. For ask/answer/reject: { text, inReplyTo? }.
+     *  For complete: { summary? }. For trigger: { goal }. */
+    payloadJson: jsonb("payload_json")
+      .$type<Record<string, unknown>>()
+      .notNull(),
+    /** Set by the dispatcher when it creates or resumes a session to handle
+     *  this message. Null until delivered. No FK — if the session is deleted
+     *  the message stays as an audit record. */
+    sessionId: text("session_id"),
+    /** pending: waiting for the dispatcher to pick up.
+     *  delivered: dispatcher has started the session/turn.
+     *  consumed: the receiving agent has acknowledged (by calling another
+     *            workflow_* tool or completing a turn that observed this msg). */
+    status: text("status", {
+      enum: ["pending", "delivered", "consumed"],
+    })
+      .notNull()
+      .default("pending"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    deliveredAt: timestamp("delivered_at"),
+  },
+  (t) => [
+    index("workflow_messages_run_idx").on(t.workflowRunId),
+    index("workflow_messages_status_idx").on(t.status, t.createdAt),
+    index("workflow_messages_session_idx").on(t.sessionId),
+  ],
 );
