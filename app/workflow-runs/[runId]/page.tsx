@@ -10,8 +10,10 @@ import {
   getWorkflow,
   listMessagesForRun,
 } from "@/lib/workflows/runs";
+import { parseWorkflowDefinition } from "@/lib/workflows/definitions";
 import { AppShell } from "@/components/layout/AppShell";
 import { Badge } from "@/components/ui/Badge";
+import { RunGraph } from "./run-graph";
 
 const kindEmoji: Record<string, string> = {
   trigger: "🚀",
@@ -70,8 +72,28 @@ export default async function WorkflowRunPage({
       .where(eq(sessions.workflowRunId, runId)),
   ]);
 
-  // Enrich sessions with agent names for display.
-  const agentIds = Array.from(new Set(runSessions.map((s) => s.agentConfigId)));
+  // Parse the definition so the graph view can render every node — including
+  // ones that haven't been spawned yet. If the JSON is somehow invalid (e.g.
+  // schema got stricter after the row was saved), fall back to a stub so the
+  // page still loads with the messages list.
+  let definition: ReturnType<typeof parseWorkflowDefinition> | null = null;
+  try {
+    definition = parseWorkflowDefinition(workflow.definition);
+  } catch {
+    definition = null;
+  }
+
+  // Collect every agent referenced — both by the definition (for the graph,
+  // including nodes not yet spawned) and by spawned sessions (defensive in
+  // case the definition was edited after the run started).
+  const agentIds = Array.from(
+    new Set([
+      ...runSessions.map((s) => s.agentConfigId),
+      ...(definition
+        ? Object.values(definition.nodes).map((n) => n.agentConfigId)
+        : []),
+    ]),
+  );
   const agentRows =
     agentIds.length > 0
       ? await db
@@ -79,10 +101,12 @@ export default async function WorkflowRunPage({
           .from(agentConfigs)
       : [];
   const agentName = new Map(agentRows.map((a) => [a.id, a.name]));
+  const agentNames: Record<string, string> = Object.fromEntries(agentName);
 
   const ctx = run.contextJson as Record<string, unknown>;
   const goal = typeof ctx.goal === "string" ? ctx.goal : "(no goal)";
   const errorText = typeof ctx.error === "string" ? ctx.error : null;
+  const isTerminal = run.status === "done" || run.status === "error";
 
   return (
     <AppShell
@@ -109,6 +133,31 @@ export default async function WorkflowRunPage({
           <div className="rounded-xl border border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300 px-4 py-3 text-[13px]">
             <strong>Run error:</strong> {errorText}
           </div>
+        ) : null}
+
+        {definition ? (
+          <RunGraph
+            nodes={definition.nodes}
+            transitions={definition.transitions}
+            sessions={runSessions.map((s) => ({
+              id: s.id,
+              workflowNodeSlug: s.workflowNodeSlug,
+              agentConfigId: s.agentConfigId,
+              status: s.status,
+              totalCostUsd: s.totalCostUsd,
+              createdAt: s.createdAt.toISOString(),
+            }))}
+            messages={messages.map((m) => ({
+              fromNode: m.fromNode,
+              toNode: m.toNode,
+              kind: m.kind,
+              createdAt: m.createdAt.toISOString(),
+            }))}
+            agentNames={agentNames}
+            runStatus={run.status}
+            currentNode={run.currentNode}
+            livePoll={!isTerminal}
+          />
         ) : null}
 
         <section className="rounded-2xl ring-1 ring-hairline bg-surface-1/60 p-4">
