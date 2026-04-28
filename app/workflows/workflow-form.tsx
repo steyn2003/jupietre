@@ -10,81 +10,18 @@ import {
   TRANSITION_KINDS,
   type ReceivableKind,
   type TransitionKind,
-  type WorkflowDefinition,
 } from "@/lib/workflows/definitions";
-
-// Shape of the form's editable state. Mirrors WorkflowDefinition but with
-// canReceive as an array (stable ordering for checkboxes) and optional
-// numeric inputs rendered as strings (so we can distinguish "" from 0).
-interface FormNode {
-  slug: string;
-  agentConfigId: string;
-  canReceive: ReceivableKind[];
-}
-interface FormTransition {
-  from: string;
-  kind: TransitionKind;
-  to: string;
-}
-interface FormLimits {
-  maxRejects: string;
-  maxAsks: string;
-  maxBudgetUsd: string;
-}
+import {
+  type FormLimits,
+  type FormNode,
+  type FormTransition,
+  type WorkflowFormInitial,
+} from "./form-helpers";
 
 interface AgentOption {
   id: string;
   name: string;
   slug: string;
-}
-
-export interface WorkflowFormInitial {
-  id?: string; // set ⇒ edit mode
-  name: string;
-  slug: string;
-  nodes: FormNode[];
-  transitions: FormTransition[];
-  limits: FormLimits;
-}
-
-export function emptyWorkflowInitial(): WorkflowFormInitial {
-  return {
-    name: "",
-    slug: "",
-    nodes: [{ slug: "pm", agentConfigId: "", canReceive: ["trigger"] }],
-    transitions: [],
-    limits: { maxRejects: "", maxAsks: "", maxBudgetUsd: "" },
-  };
-}
-
-export function initialFromDefinition(
-  workflow: {
-    id: string;
-    name: string;
-    slug: string;
-  },
-  def: WorkflowDefinition,
-): WorkflowFormInitial {
-  return {
-    id: workflow.id,
-    name: workflow.name,
-    slug: workflow.slug,
-    nodes: Object.entries(def.nodes).map(([slug, n]) => ({
-      slug,
-      agentConfigId: n.agentConfigId,
-      canReceive: [...n.canReceive],
-    })),
-    transitions: def.transitions.map((t) => ({
-      from: t.from,
-      kind: t.kind,
-      to: t.to ?? "",
-    })),
-    limits: {
-      maxRejects: def.limits.maxRejects?.toString() ?? "",
-      maxAsks: def.limits.maxAsks?.toString() ?? "",
-      maxBudgetUsd: def.limits.maxBudgetUsd?.toString() ?? "",
-    },
-  };
 }
 
 // ────────────────────────────────────────────────────────────────────

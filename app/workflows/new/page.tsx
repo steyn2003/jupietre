@@ -3,7 +3,8 @@ import { getServerSession } from "@/lib/auth/session";
 import { getMyTeamIds } from "@/lib/auth/authz";
 import { listVisibleAgentConfigs } from "@/lib/db/agent-configs";
 import { AppShell } from "@/components/layout/AppShell";
-import { WorkflowForm, emptyWorkflowInitial } from "../workflow-form";
+import { WorkflowForm } from "../workflow-form";
+import { emptyWorkflowInitial } from "../form-helpers";
 
 export default async function NewWorkflowPage() {
   const session = await getServerSession();

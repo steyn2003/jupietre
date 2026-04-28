@@ -4,7 +4,8 @@ import { canUseWorkflow, getMyTeamIds } from "@/lib/auth/authz";
 import { listVisibleAgentConfigs } from "@/lib/db/agent-configs";
 import { getWorkflowDefinition } from "@/lib/workflows/runs";
 import { AppShell } from "@/components/layout/AppShell";
-import { WorkflowForm, initialFromDefinition } from "../../workflow-form";
+import { WorkflowForm } from "../../workflow-form";
+import { initialFromDefinition } from "../../form-helpers";
 
 export default async function EditWorkflowPage({
   params,

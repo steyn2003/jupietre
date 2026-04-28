@@ -183,12 +183,31 @@ export const workflowDefinitionSchema = z
     }
 
     // Each node's canReceive must be consistent with how agents actually
-    // receive messages. Trigger can only land on trigger-receiving nodes.
-    // Every other receivable kind (handoff/ask/answer/reject) must have at
-    // least one inbound transition targeting a node that lists it.
+    // receive messages.
+    //  - trigger: no transition needed (explicit entry point).
+    //  - handoff / reject: must have at least one inbound transition with
+    //    that kind targeting this node (the dispatcher routes by transition).
+    //  - answer: NOT a transition kind. Answers are the reverse channel of
+    //    asks — they resume the asker's session via queueFollowUp. A node
+    //    can legitimately receive answers iff it can ask in the first place,
+    //    so we check that this node has at least one OUTBOUND ask.
     for (const [slug, node] of Object.entries(def.nodes)) {
       for (const kind of node.canReceive) {
-        if (kind === "trigger") continue; // entry points don't need transitions
+        if (kind === "trigger") continue;
+        if (kind === "answer") {
+          const canAsk = def.transitions.some(
+            (t) => t.from === slug && t.kind === "ask",
+          );
+          if (!canAsk) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `node "${slug}" declares canReceive="answer" but has no outbound ask transition — it could never receive an answer`,
+              path: ["nodes", slug, "canReceive"],
+            });
+          }
+          continue;
+        }
+        // handoff / reject — require an inbound transition with that kind.
         const inbound = def.transitions.some(
           (t) => t.to === slug && t.kind === kind,
         );
