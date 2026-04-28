@@ -205,6 +205,49 @@ export async function listRunsForOwner(
     .orderBy(desc(workflowRuns.createdAt));
 }
 
+/**
+ * All runs the user can see — gated by *workflow* ACL (own + team) so
+ * teammates can see runs against shared workflows even if they didn't
+ * start them. Returns the run row joined with the workflow's name + slug
+ * for display.
+ */
+export async function listVisibleRuns(
+  userId: string,
+  myTeamIds: string[],
+  limit = 100,
+): Promise<
+  Array<
+    WorkflowRun & {
+      workflowName: string;
+      workflowSlug: string;
+    }
+  >
+> {
+  const condition =
+    myTeamIds.length === 0
+      ? eq(workflows.ownerId, userId)
+      : or(
+          eq(workflows.ownerId, userId),
+          inArray(workflows.teamId, myTeamIds),
+        );
+  const rows = await db
+    .select({
+      run: workflowRuns,
+      workflowName: workflows.name,
+      workflowSlug: workflows.slug,
+    })
+    .from(workflowRuns)
+    .innerJoin(workflows, eq(workflowRuns.workflowId, workflows.id))
+    .where(condition)
+    .orderBy(desc(workflowRuns.createdAt))
+    .limit(limit);
+  return rows.map((r) => ({
+    ...r.run,
+    workflowName: r.workflowName,
+    workflowSlug: r.workflowSlug,
+  }));
+}
+
 export async function setRunStatus(
   id: string,
   status: WorkflowRun["status"],
