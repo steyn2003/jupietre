@@ -1,4 +1,7 @@
-import "server-only";
+// NOTE: this module is intentionally isomorphic — zod schemas, types, and
+// pure render functions are imported by both server (API routes,
+// dispatcher) and client (workflow-form.tsx for live validation). No
+// `server-only` marker, no DB access, no fs.
 import { z } from "zod";
 
 // ────────────────────────────────────────────────────────────────────
