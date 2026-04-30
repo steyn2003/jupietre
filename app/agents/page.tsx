@@ -20,7 +20,7 @@ export default async function AgentsPage() {
       email={session.email}
       eyebrow="Configuration"
       title="Agents"
-      description="Configure the roles available for new sessions and Linear pickup. Each agent owns its own model, tools, and budget."
+      description="Configure the roles available for new sessions and workflows. Each agent owns its own model, tools, and budget. Linear pickup is wired separately under Pollers."
       action={
         <Link href="/agents/new">
           <Button
@@ -40,7 +40,6 @@ export default async function AgentsPage() {
           model: a.model,
           maxTurns: a.maxTurns,
           maxBudgetUsd: a.maxBudgetUsd,
-          linearPickup: a.linearPickup === 1,
           ownerId: a.userId,
           teamId: a.teamId,
         }))}

@@ -1,198 +1,30 @@
 import "server-only";
-import { and, desc, eq, sql as dsql } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { sessionMessages, sessions, users } from "@/lib/db/schema";
-import { listAgentConfigs, type AgentConfig } from "@/lib/db/agent-configs";
+import {
+  getAgentConfigById,
+  listAgentConfigs,
+  type AgentConfig,
+} from "@/lib/db/agent-configs";
+import {
+  listEnabledPollersWithRules,
+  type LinearPoller,
+  type LinearPollerRule,
+  type PollerWithRules,
+} from "@/lib/db/linear-pollers";
 import { listAllRepos, type Repo } from "@/lib/repos/manager";
 import { provisionWorktree } from "@/lib/worktrees/manager";
 import { startTurn } from "@/lib/agent/runner";
+import { defaultWorkflowForSlug } from "./default-workflows";
+import { seedFromEnvIfEmpty } from "./seed-from-env";
 
-interface PickupConfig {
+interface ResolvedRule {
+  rule: LinearPollerRule;
   agent: AgentConfig;
-  pickupState: string;
-  inProgressState: string;
-  label: string;
-}
-
-function envKeyForSlug(slug: string): string {
-  return slug.toUpperCase().replace(/-/g, "_");
-}
-
-// ────────────────────────────────────────────────────────────────────
-// Workflow definitions — injected into every Linear-triggered first
-// message. Each role's "Hand off" step requires a STRUCTURED Linear
-// comment so the next agent in the chain can find what's relevant to
-// their role without scanning the whole ticket.
-// ────────────────────────────────────────────────────────────────────
-
-const PM_WORKFLOW = `## Workflow (PM)
-
-1. **Picked up** — start with linear_add_comment posting:
-   \`👋 **Joseph (PM)** picked this up — starting prep.\`
-2. **Read** the ticket via linear_get_issue — full description, comments, labels.
-   If you previously asked questions and got replies, incorporate them and skip to step 5.
-3. **Repo label** — the ticket MUST have a label matching a registered repo. If
-   missing, post a comment via linear_add_comment asking which repo, move to
-   "Waiting" with linear_update_issue_state, and stop.
-4. **Clarify if needed** — if the ticket has the "noQuestions" label, skip this
-   step. Otherwise, if the ticket is too vague, post specific questions via
-   linear_add_comment, move to "Waiting", and stop.
-5. **Size check** — if too large (3+ unrelated modules), split into
-   independently-mergeable sub-issues via linear_create_issue.
-6. **Enrich** — read the current description with linear_get_issue, then call
-   linear_update_issue with an APPENDED description: file paths, key functions,
-   patterns, edge cases, Definition of Done, test cases. Never overwrite.
-7. **Coding prompt** — append a 1-2 sentence coding prompt at the bottom of the
-   description: [Action] [thing] in [location], [constraint].
-8. **Hand off** — call linear_update_issue_state to move to "In Development",
-   then linear_add_comment with this EXACT structured handoff (Pieter the
-   engineer will read this first):
-
-   \`\`\`
-   ## ➡️ Handoff to Pieter (Engineer)
-   **Coding prompt:** <one-sentence action>
-   **Files to touch:** <bullet list of paths>
-   **Patterns to follow:** <bullet list>
-   **Definition of Done:** <bullet list of acceptance criteria>
-   **Out of scope:** <what NOT to change>
-   \`\`\`
-
-## Rules
-- Always APPEND to description, never overwrite.
-- Final assistant text is NOT the deliverable. The deliverable lives on Linear.
-- You are NOT done until linear_update_issue (description) AND
-  linear_add_comment (structured handoff) AND linear_update_issue_state (move
-  forward) have ALL been called.`;
-
-const ENGINEER_WORKFLOW = `## Workflow (Engineer)
-
-1. **Picked up** — start with linear_add_comment posting:
-   \`👋 **Pieter (Engineer)** picked this up — starting work.\`
-2. **Understand** — linear_get_issue to read description, comments, and Joseph's
-   structured "## ➡️ Handoff to Pieter" block in the latest comments. That
-   block IS your scope — files to touch, patterns, DoD. If a QA agent (Hassan)
-   previously rejected, find his "## ❌ Rework needed" comment instead — that
-   is your scope.
-3. **Plan** — write a numbered, dependency-ordered implementation plan. Each
-   step is one small verifiable change with a specific file + function.
-4. **Execute** — implement step-by-step in the repo working directory. Use
-   conventional commits (feat:, fix:, refactor:). Push after each commit.
-5. **Verify** — run build/tests in the worktree. Fix failures one step at a time.
-6. **Ship** — push the branch, create the PR via gh tools (reference the Linear
-   issue, list completed steps), then linear_update_issue_state to move to
-   "In Review".
-7. **Hand off** — linear_add_comment with this EXACT structured handoff (Hassan
-   the QA agent will read this first):
-
-   \`\`\`
-   ## ➡️ Handoff to Hassan (QA)
-   **PR:** <PR url>
-   **Branch:** <branch name>
-   **Acceptance criteria addressed:**
-   - [x] <criterion 1> — <how it was addressed>
-   - [x] <criterion 2> — <how it was addressed>
-   **What to test:** <bullet list of scenarios>
-   **Known limitations / not in scope:** <if any>
-   \`\`\`
-
-## Rules
-- No questions to chat — make reasonable decisions and proceed.
-- Small, focused conventional commits. No debug logs or unrelated changes.
-- You are NOT done until the PR is created AND linear_update_issue_state has
-  moved the ticket to "In Review" AND linear_add_comment has posted the
-  structured handoff with the PR link.`;
-
-const QA_WORKFLOW = `## Workflow (QA)
-
-1. **Picked up** — start with linear_add_comment posting:
-   \`👋 **Hassan (QA)** picked this up — starting review.\`
-2. **Read** — linear_get_issue. Find Pieter's "## ➡️ Handoff to Hassan" block in
-   the latest comments — that is your scope (PR url, acceptance criteria, what
-   to test).
-3. Check out the PR branch and read the diff (\`git diff origin/main...HEAD\`).
-4. For each acceptance criterion, check whether the diff addresses it. Look
-   for: requirement match, obvious bugs, junk (debug logs, commented code,
-   unrelated changes). Do NOT review style/architecture. Do NOT run
-   builds/tests/linters.
-5. **Decide** —
-   **Approve:** gh_pr_review approve, linear_update_issue_state → "Ready for
-   Review", then linear_add_comment with this EXACT structured handoff:
-
-   \`\`\`
-   ## ✅ Approved by Hassan (QA)
-   **PR:** <url>
-   **Verified:**
-   - [x] <criterion 1>
-   - [x] <criterion 2>
-   \`\`\`
-
-   **Reject:** gh_pr_review request-changes citing the specific gaps,
-   linear_update_issue_state → "In Development", then linear_add_comment with
-   this EXACT structured handoff (Pieter will read this first on rework):
-
-   \`\`\`
-   ## ❌ Rework needed — Hassan (QA) → Pieter (Engineer)
-   **PR:** <url>
-   **Gaps to address:**
-   - [ ] <gap 1 — specific, with file/line if possible>
-   - [ ] <gap 2>
-   **Out of scope for this rework:** <anything that does NOT need fixing>
-   \`\`\`
-
-## Rules
-- Be FAST. 3-7 tool calls total.
-- One sentence per gap.
-- A reject WITHOUT the structured "## ❌ Rework needed" comment AND WITHOUT
-  linear_update_issue_state is a broken handoff — Pieter will never see the
-  rejection. Both calls are required.`;
-
-function workflowForSlug(slug: string): string {
-  switch (slug) {
-    case "pm":
-      return PM_WORKFLOW;
-    case "engineer":
-      return ENGINEER_WORKFLOW;
-    case "tester":
-    case "qa":
-      return QA_WORKFLOW;
-    default:
-      return `## Workflow\n\nThis ticket was triggered by the Linear poller. ` +
-        `Use the linear_* tools to read the ticket, push your output back to ` +
-        `Linear (description updates and/or comments), and call ` +
-        `linear_update_issue_state to move the ticket to the correct next ` +
-        `state when you finish. Do not return findings only in chat.`;
-  }
-}
-
-function loadPickupConfigs(agents: AgentConfig[]): PickupConfig[] {
-  const list: PickupConfig[] = [];
-  for (const agent of agents) {
-    if (agent.linearPickup !== 1) continue;
-    const envBase = envKeyForSlug(agent.slug);
-    // Legacy tester used QA_* env vars; preserve that mapping.
-    const pickupKey =
-      agent.slug === "tester" ? "QA_PICKUP_STATE" : `${envBase}_PICKUP_STATE`;
-    const inProgressKey =
-      agent.slug === "tester"
-        ? "QA_IN_PROGRESS_STATE"
-        : `${envBase}_IN_PROGRESS_STATE`;
-    const pickup = process.env[pickupKey];
-    const inProgress = process.env[inProgressKey];
-    if (!pickup || !inProgress) {
-      console.warn(
-        `[linear] Skipping agent '${agent.slug}' — ${pickupKey} / ${inProgressKey} not set`,
-      );
-      continue;
-    }
-    list.push({
-      agent,
-      pickupState: pickup,
-      inProgressState: inProgress,
-      label: "agent",
-    });
-  }
-  return list;
+  /** poller.defaultLabel unless rule.labelOverride is set */
+  effectiveLabel: string;
 }
 
 /**
@@ -222,7 +54,6 @@ async function buildPriorContext(
   const others = priorSessions.filter((s) => s.agentConfigId !== currentAgentId);
   if (others.length === 0) return null;
 
-  const { listAgentConfigs } = await import("@/lib/db/agent-configs");
   const userId = await findAdminUserId();
   if (!userId) return null;
   const allAgents = await listAgentConfigs(userId);
@@ -232,7 +63,6 @@ async function buildPriorContext(
   for (const s of others.slice(0, 3)) {
     const name = agentNameById.get(s.agentConfigId) ?? "Unknown agent";
     const when = s.createdAt.toISOString().slice(0, 16).replace("T", " ");
-    // Last assistant text from that session — tells you what they ended on.
     const lastMsg = (
       await db
         .select({ text: sessionMessages.text })
@@ -275,34 +105,59 @@ async function findAdminUserId(): Promise<string | null> {
   return rows[0]?.id ?? null;
 }
 
-async function pollOnce(): Promise<void> {
+async function resolveRules(
+  poller: LinearPoller,
+  rules: LinearPollerRule[],
+): Promise<ResolvedRule[]> {
+  const out: ResolvedRule[] = [];
+  for (const rule of rules) {
+    const agent = await getAgentConfigById(rule.agentConfigId);
+    if (!agent) {
+      console.warn(
+        `[linear:${poller.name}] rule ${rule.id} references missing agent ${rule.agentConfigId} — skipping`,
+      );
+      continue;
+    }
+    out.push({
+      rule,
+      agent,
+      effectiveLabel: rule.labelOverride ?? poller.defaultLabel,
+    });
+  }
+  return out;
+}
+
+async function pollOnce(entry: PollerWithRules): Promise<void> {
+  const { poller, rules } = entry;
+  if (!poller.enabled) return;
+  if (rules.length === 0) return;
+
   const { LinearClient } = await import("@linear/sdk");
-  const apiKey = process.env.LINEAR_API_KEY;
-  if (!apiKey) return;
+  const client = new LinearClient({ apiKey: poller.apiKey });
 
   const userId = await findAdminUserId();
   if (!userId) return;
 
-  const agents = await listAgentConfigs(userId);
-  const configs = loadPickupConfigs(agents);
-  if (configs.length === 0) return;
+  const resolved = await resolveRules(poller, rules);
+  if (resolved.length === 0) return;
 
-  const client = new LinearClient({ apiKey });
   const repoMap = await buildRepoMap();
 
-  for (const cfg of configs) {
-    const issues = await client.issues({
-      filter: {
-        state: { name: { eqIgnoreCase: cfg.pickupState } },
-        labels: { some: { name: { eqIgnoreCase: cfg.label } } },
-      },
-    });
+  for (const cfg of resolved) {
+    const filter: Record<string, unknown> = {
+      state: { name: { eqIgnoreCase: cfg.rule.pickupState } },
+      labels: { some: { name: { eqIgnoreCase: cfg.effectiveLabel } } },
+    };
+    if (poller.teamKey) {
+      filter.team = { key: { eq: poller.teamKey } };
+    }
+    const issues = await client.issues({ filter });
 
     for (const issue of issues.nodes) {
       // Gate per-(issue, agent), not per-issue. The same Linear ticket flows
-      // through PM → Engineer → QA, and may re-enter Engineer's queue after
-      // a QA reject. Each pickup gets its own session, but we MUST avoid
-      // double-pickups while a session for this (issue, agent) is in flight.
+      // through multiple agents (e.g. PM → Engineer → QA), and may re-enter an
+      // earlier stage on rework. Each pickup gets its own session, but we MUST
+      // avoid double-pickups while a session for this (issue, agent) is live.
 
       // (a) If ANY session for this issue is currently running, skip — we
       //     don't want two agents racing on the same ticket simultaneously.
@@ -342,7 +197,7 @@ async function pollOnce(): Promise<void> {
           .limit(1)
       )[0];
       if (lastForThisAgent) {
-        const COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+        const COOLDOWN_MS = 5 * 60 * 1000;
         const ageMs = Date.now() - lastForThisAgent.createdAt.getTime();
         if (ageMs < COOLDOWN_MS) continue;
       }
@@ -360,7 +215,7 @@ async function pollOnce(): Promise<void> {
       }
       if (!repo) {
         console.warn(
-          `[linear] ${issue.identifier} has no label matching a registered repo (slugs: ${Array.from(
+          `[linear:${poller.name}] ${issue.identifier} has no label matching a registered repo (slugs: ${Array.from(
             repoMap.keys(),
           ).join(", ") || "(none)"}) — skipping`,
         );
@@ -374,7 +229,8 @@ async function pollOnce(): Promise<void> {
         if (team) {
           const states = await team.states();
           const target = states.nodes.find(
-            (s) => s.name.toLowerCase() === cfg.inProgressState.toLowerCase(),
+            (s) =>
+              s.name.toLowerCase() === cfg.rule.inProgressState.toLowerCase(),
           );
           if (target) {
             await client.updateIssue(issue.id, { stateId: target.id });
@@ -382,7 +238,7 @@ async function pollOnce(): Promise<void> {
         }
       } catch (err) {
         console.error(
-          `[linear] Failed to move ${issue.identifier} to ${cfg.inProgressState}:`,
+          `[linear:${poller.name}] Failed to move ${issue.identifier} to ${cfg.rule.inProgressState}:`,
           err,
         );
       }
@@ -403,8 +259,6 @@ async function pollOnce(): Promise<void> {
         status: "idle",
       });
 
-      // Provision the per-session worktree off the registered repo's default
-      // branch — same flow as UI-created sessions.
       try {
         const wt = await provisionWorktree({
           sourceRepoPath: repoPath,
@@ -422,12 +276,13 @@ async function pollOnce(): Promise<void> {
           .where(eq(sessions.id, sessionId));
       } catch (err) {
         console.warn(
-          `[linear] worktree provisioning failed for ${issue.identifier}; running against clone:`,
+          `[linear:${poller.name}] worktree provisioning failed for ${issue.identifier}; running against clone:`,
           err,
         );
       }
 
-      const workflow = workflowForSlug(cfg.agent.slug);
+      const workflow =
+        cfg.rule.workflowTemplate ?? defaultWorkflowForSlug(cfg.agent.slug);
       const priorContext = await buildPriorContext(
         issue.identifier,
         cfg.agent.id,
@@ -444,14 +299,85 @@ async function pollOnce(): Promise<void> {
         `operator to observe; Linear is the source of truth for the ticket.`;
 
       console.log(
-        `[linear] Created session for ${issue.identifier} (${cfg.agent.slug}) in ${repoLabel}`,
+        `[linear:${poller.name}] Created session for ${issue.identifier} (${cfg.agent.slug}) in ${repoLabel}`,
       );
       void startTurn({ sessionId, userText: firstMessage });
     }
   }
 }
 
+// ─── manager: one tick loop per enabled poller, reconciled periodically ──
+
+// Source of truth for what the ticks see. Reconcile rewrites this from DB.
+// Each tick reads from here, so rule edits and renames propagate on the next
+// tick without needing to restart the loop.
+const ENTRIES: Map<string, PollerWithRules> = new Map();
+
+interface RunningLoop {
+  pollerId: string;
+  intervalMs: number;
+  timer: NodeJS.Timeout;
+}
+
+const RUNNING: Map<string, RunningLoop> = new Map();
+const RECONCILE_INTERVAL_MS = 60_000;
 let started = false;
+let reconcileTimer: NodeJS.Timeout | null = null;
+
+function startLoopFor(pollerId: string, intervalMs: number): void {
+  const tick = () => {
+    const entry = ENTRIES.get(pollerId);
+    if (!entry) return;
+    void pollOnce(entry).catch((err) => {
+      console.error(`[linear:${entry.poller.name}] poll error:`, err);
+    });
+  };
+  // First tick after a small delay so DB connections settle on boot.
+  setTimeout(tick, 5_000);
+  const timer = setInterval(tick, intervalMs);
+  RUNNING.set(pollerId, { pollerId, intervalMs, timer });
+  const name = ENTRIES.get(pollerId)?.poller.name ?? pollerId;
+  const ruleCount = ENTRIES.get(pollerId)?.rules.length ?? 0;
+  console.log(
+    `[linear:${name}] loop started — every ${intervalMs / 1000}s, ${ruleCount} rule(s)`,
+  );
+}
+
+function stopLoopFor(pollerId: string, name?: string): void {
+  const running = RUNNING.get(pollerId);
+  if (!running) return;
+  clearInterval(running.timer);
+  RUNNING.delete(pollerId);
+  console.log(`[linear:${name ?? pollerId}] loop stopped`);
+}
+
+async function reconcile(): Promise<void> {
+  const entries = await listEnabledPollersWithRules();
+  const wantById = new Map(entries.map((e) => [e.poller.id, e]));
+
+  // Stop loops for pollers that disappeared or were disabled.
+  for (const id of [...RUNNING.keys()]) {
+    if (!wantById.has(id)) {
+      stopLoopFor(id, ENTRIES.get(id)?.poller.name);
+      ENTRIES.delete(id);
+    }
+  }
+
+  for (const entry of entries) {
+    ENTRIES.set(entry.poller.id, entry);
+    const running = RUNNING.get(entry.poller.id);
+    if (!running) {
+      startLoopFor(entry.poller.id, entry.poller.pollIntervalMs);
+      continue;
+    }
+    // Interval changed → restart with new cadence. Rule and name edits are
+    // already visible to the next tick via ENTRIES — no restart needed.
+    if (running.intervalMs !== entry.poller.pollIntervalMs) {
+      stopLoopFor(entry.poller.id, entry.poller.name);
+      startLoopFor(entry.poller.id, entry.poller.pollIntervalMs);
+    }
+  }
+}
 
 export function startLinearPoller(): void {
   if (started) return;
@@ -461,15 +387,29 @@ export function startLinearPoller(): void {
   }
   started = true;
 
-  const intervalMs = Number(process.env.POLL_INTERVAL_MS) || 120_000;
-  console.log(`[linear] poller starting — every ${intervalMs / 1000}s`);
-
-  const tick = () => {
-    pollOnce().catch((err) => {
-      console.error("[linear] poll error:", err);
-    });
-  };
-
-  setTimeout(tick, 5_000);
-  setInterval(tick, intervalMs);
+  // Kick off async bootstrap: seed-from-env (idempotent), then reconcile, then
+  // schedule periodic reconciles. We don't `await` here because this is
+  // called from instrumentation register() which is sync-ish.
+  void (async () => {
+    try {
+      await seedFromEnvIfEmpty();
+    } catch (err) {
+      console.error("[linear] seed-from-env failed:", err);
+    }
+    try {
+      await reconcile();
+    } catch (err) {
+      console.error("[linear] initial reconcile failed:", err);
+    }
+    reconcileTimer = setInterval(() => {
+      void reconcile().catch((err) => {
+        console.error("[linear] reconcile error:", err);
+      });
+    }, RECONCILE_INTERVAL_MS);
+    console.log("[linear] manager started");
+  })();
 }
+
+// Intentionally not exporting the rule-resolution helpers — they're internal
+// to the manager. The UI talks to the DB via lib/db/linear-pollers.ts; the
+// manager picks up changes on the next reconcile (every 60s).

@@ -31,7 +31,6 @@ export default async function NewAgentPage() {
           maxBudgetUsd: null,
           dailyBudgetUsd: null,
           monthlyBudgetUsd: null,
-          linearPickup: false,
           enableLinearTools: false,
           enableGithubTools: false,
           approvalMode: "none",

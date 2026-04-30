@@ -35,7 +35,6 @@ export interface AgentFormInitial {
   maxBudgetUsd: number | null;
   dailyBudgetUsd: number | null;
   monthlyBudgetUsd: number | null;
-  linearPickup: boolean;
   enableLinearTools: boolean;
   enableGithubTools: boolean;
   approvalMode: "none" | "list" | "all";
@@ -76,7 +75,6 @@ export function AgentForm({
   const [monthlyBudgetUsd, setMonthlyBudgetUsd] = useState<string>(
     initial.monthlyBudgetUsd === null ? "" : String(initial.monthlyBudgetUsd),
   );
-  const [linearPickup, setLinearPickup] = useState(initial.linearPickup);
   const [enableLinearTools, setEnableLinearTools] = useState(
     initial.enableLinearTools,
   );
@@ -128,7 +126,6 @@ export function AgentForm({
           dailyBudgetUsd.trim() === "" ? null : Number(dailyBudgetUsd),
         monthlyBudgetUsd:
           monthlyBudgetUsd.trim() === "" ? null : Number(monthlyBudgetUsd),
-        linearPickup,
         enableLinearTools,
         enableGithubTools,
         approvalMode,
@@ -177,13 +174,7 @@ export function AgentForm({
             label="Slug"
             htmlFor="slug"
             required
-            description={
-              <>
-                kebab-case, unique per user. Used for{" "}
-                <code className="font-mono">&lt;SLUG&gt;_PICKUP_STATE</code>{" "}
-                env vars.
-              </>
-            }
+            description="kebab-case, unique per user. Used as the fallback key for the role-specific Linear workflow text when a poller rule has none."
           >
             <Input
               id="slug"
@@ -350,27 +341,17 @@ export function AgentForm({
             }
           />
           <CheckboxRow
-            checked={linearPickup}
-            onChange={setLinearPickup}
-            label={
-              <>
-                Linear pickup — poller creates sessions for this agent when{" "}
-                <code className="font-mono text-[12px]">
-                  &lt;SLUG&gt;_PICKUP_STATE
-                </code>{" "}
-                env var is set
-              </>
-            }
-          />
-          <CheckboxRow
             checked={enableLinearTools}
             onChange={setEnableLinearTools}
             label={
               <>
                 Linear MCP tools — expose{" "}
-                <code className="font-mono text-[12px]">linear_*</code> tools
-                (requires{" "}
-                <code className="font-mono text-[12px]">LINEAR_API_KEY</code>)
+                <code className="font-mono text-[12px]">linear_*</code> tools.
+                Wire pickup status → agent rules under{" "}
+                <a href="/pollers" className="underline hover:text-fg">
+                  Pollers
+                </a>
+                .
               </>
             }
           />

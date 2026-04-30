@@ -15,6 +15,13 @@
       "when": 1777039086696,
       "tag": "0001_amazing_electro",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777535629932,
+      "tag": "0002_naive_darkhawk",
+      "breakpoints": true
     }
   ]
 }

@@ -26,7 +26,6 @@ const patchSchema = z.object({
   maxBudgetUsd: z.number().int().positive().nullable().optional(),
   dailyBudgetUsd: z.number().int().positive().nullable().optional(),
   monthlyBudgetUsd: z.number().int().positive().nullable().optional(),
-  linearPickup: z.boolean().optional(),
   enableLinearTools: z.boolean().optional(),
   enableGithubTools: z.boolean().optional(),
   approvalMode: z.enum(["none", "list", "all"]).optional(),
@@ -101,8 +100,6 @@ export async function PATCH(
   if (d.dailyBudgetUsd !== undefined) patch.dailyBudgetUsd = d.dailyBudgetUsd;
   if (d.monthlyBudgetUsd !== undefined)
     patch.monthlyBudgetUsd = d.monthlyBudgetUsd;
-  if (d.linearPickup !== undefined)
-    patch.linearPickup = d.linearPickup ? 1 : 0;
   if (d.enableLinearTools !== undefined)
     patch.enableLinearTools = d.enableLinearTools ? 1 : 0;
   if (d.enableGithubTools !== undefined)

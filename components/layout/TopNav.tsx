@@ -12,6 +12,7 @@ import {
   GitBranchIcon,
   FlowArrowIcon,
   PlayIcon,
+  KanbanIcon,
 } from "@phosphor-icons/react";
 import { cn } from "@/components/ui/cn";
 
@@ -53,6 +54,12 @@ const NAV: NavItem[] = [
     label: "Runs",
     icon: <PlayIcon weight="regular" />,
     matchPrefix: "/workflow-runs",
+  },
+  {
+    href: "/pollers",
+    label: "Pollers",
+    icon: <KanbanIcon weight="regular" />,
+    matchPrefix: "/pollers",
   },
   {
     href: "/usage",

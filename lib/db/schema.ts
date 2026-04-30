@@ -113,7 +113,6 @@ export const agentConfigs = pgTable(
     dailyBudgetUsd: integer("daily_budget_usd"),
     /** Calendar-month cap (UTC). Same semantics as daily. */
     monthlyBudgetUsd: integer("monthly_budget_usd"),
-    linearPickup: integer("linear_pickup").notNull().default(0),
     /** When 1, the SDK `mcpServers` bundle includes the Linear tools. */
     enableLinearTools: integer("enable_linear_tools").notNull().default(0),
     /** When 1, the SDK `mcpServers` bundle includes the git + gh tools. */
@@ -448,6 +447,86 @@ export const workflowRuns = pgTable(
     index("workflow_runs_workflow_idx").on(t.workflowId),
     index("workflow_runs_owner_idx").on(t.ownerId),
     index("workflow_runs_status_idx").on(t.status),
+  ],
+);
+
+// ────────────────────────────────────────────────────────────────────
+// Linear pollers (M-linear-ui)
+//
+// Each row in `linear_pollers` represents one polling loop bound to a Linear
+// workspace (api key) and an optional team filter. Multiple rows = multiple
+// independent pollers. The poller manager in lib/linear/poller.ts reads all
+// enabled rows and runs one tick loop per row at that row's interval.
+//
+// `linear_poller_rules` is the per-status mapping the operator configures in
+// the UI: "when an issue with the poller's label sits in state `pickupState`,
+// hand it to `agentConfigId` and move it to `inProgressState`." The rule's
+// `workflowTemplate` is the role-specific recipe injected into the agent's
+// first message. When null, `lib/linear/default-workflows.ts` falls back to a
+// slug-keyed default (preserved for backward-compat seeding).
+// ────────────────────────────────────────────────────────────────────
+
+export const linearPollers = pgTable(
+  "linear_pollers",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Optional team scope — informational; the manager runs every enabled
+     *  poller regardless of team. */
+    teamId: text("team_id").references(() => teams.id, { onDelete: "set null" }),
+    /** Display name shown in the UI ("ENG workspace", "Customer support", …). */
+    name: text("name").notNull(),
+    /** Linear personal API key. Plaintext for now — no field-level encryption
+     *  in the codebase yet; matches how other secrets were treated when env-injected. */
+    apiKey: text("api_key").notNull(),
+    /** Optional Linear team key (e.g. "ENG"). When set, only that team's
+     *  issues are considered. Null = all teams accessible to the API key. */
+    teamKey: text("team_key"),
+    /** Label that flags an issue as eligible for pickup ("agent" by default).
+     *  Per-rule override on linearPollerRules.labelOverride wins when set. */
+    defaultLabel: text("default_label").notNull().default("agent"),
+    /** Tick cadence in milliseconds. */
+    pollIntervalMs: integer("poll_interval_ms").notNull().default(120_000),
+    enabled: integer("enabled").notNull().default(1),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [index("linear_pollers_owner_idx").on(t.ownerId)],
+);
+
+export const linearPollerRules = pgTable(
+  "linear_poller_rules",
+  {
+    id: text("id").primaryKey(),
+    pollerId: text("poller_id")
+      .notNull()
+      .references(() => linearPollers.id, { onDelete: "cascade" }),
+    /** Linear state name to pick up issues from (e.g. "Ready for PM"). */
+    pickupState: text("pickup_state").notNull(),
+    /** State to move issues into the moment a session is created. */
+    inProgressState: text("in_progress_state").notNull(),
+    agentConfigId: text("agent_config_id")
+      .notNull()
+      .references(() => agentConfigs.id, { onDelete: "restrict" }),
+    /** Override the poller-level label filter for this rule. Null = inherit. */
+    labelOverride: text("label_override"),
+    /** Role-specific instructions injected into the agent's first message.
+     *  Null falls back to the default keyed by the agent's slug (PM/Engineer/QA). */
+    workflowTemplate: text("workflow_template"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [
+    index("linear_poller_rules_poller_idx").on(t.pollerId),
+    // One agent should only be wired once per (poller, pickupState). Lets the
+    // manager loop be deterministic and the UI surface "this rule already exists".
+    uniqueIndex("linear_poller_rules_dedupe_idx").on(
+      t.pollerId,
+      t.pickupState,
+      t.agentConfigId,
+    ),
   ],
 );
 

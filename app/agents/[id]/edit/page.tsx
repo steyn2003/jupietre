@@ -46,7 +46,6 @@ export default async function EditAgentPage({
           maxBudgetUsd: row.maxBudgetUsd,
           dailyBudgetUsd: row.dailyBudgetUsd,
           monthlyBudgetUsd: row.monthlyBudgetUsd,
-          linearPickup: row.linearPickup === 1,
           enableLinearTools: row.enableLinearTools === 1,
           enableGithubTools: row.enableGithubTools === 1,
           approvalMode: row.approvalMode,

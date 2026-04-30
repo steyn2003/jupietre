@@ -3,10 +3,19 @@ import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { LinearClient } from "@linear/sdk";
 import { z } from "zod";
 import { recordArtifact } from "@/lib/db/artifacts";
+import { firstEnabledPollerApiKey } from "@/lib/db/linear-pollers";
 
-function getClient(): LinearClient {
-  const apiKey = process.env.LINEAR_API_KEY;
-  if (!apiKey) throw new Error("LINEAR_API_KEY not set");
+async function getClient(): Promise<LinearClient> {
+  // Prefer an enabled poller's API key (configured in /pollers). Fall back to
+  // LINEAR_API_KEY env for instances that haven't migrated yet or where the
+  // tools are used outside of any configured poller.
+  const fromDb = await firstEnabledPollerApiKey();
+  const apiKey = fromDb ?? process.env.LINEAR_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "No Linear API key configured. Add a poller in /pollers or set LINEAR_API_KEY.",
+    );
+  }
   return new LinearClient({ apiKey });
 }
 
@@ -21,7 +30,7 @@ export function buildLinearTools(sessionId: string) {
           .describe("Issue ID (UUID) or identifier (e.g. ENG-123)"),
       },
       async ({ issueId }) => {
-        const client = getClient();
+        const client = await getClient();
         const issue = await client.issue(issueId);
         const state = await issue.state;
         const labels = await issue.labels();
@@ -62,7 +71,7 @@ export function buildLinearTools(sessionId: string) {
           ),
       },
       async ({ issueId, stateName }) => {
-        const client = getClient();
+        const client = await getClient();
         const issue = await client.issue(issueId);
         const team = await issue.team;
         if (!team) throw new Error("Issue has no team");
@@ -98,7 +107,7 @@ export function buildLinearTools(sessionId: string) {
         body: z.string().describe("Comment body in markdown"),
       },
       async ({ issueId, body }) => {
-        const client = getClient();
+        const client = await getClient();
         const issue = await client.issue(issueId);
         const result = await client.createComment({
           issueId: issue.id,
@@ -144,7 +153,7 @@ export function buildLinearTools(sessionId: string) {
         labelNames: z.array(z.string()).optional(),
       },
       async ({ issueId, title, description, priority, labelNames }) => {
-        const client = getClient();
+        const client = await getClient();
         const issue = await client.issue(issueId);
 
         const update: Record<string, unknown> = {};
@@ -190,7 +199,7 @@ export function buildLinearTools(sessionId: string) {
         labelNames: z.array(z.string()).optional(),
       },
       async ({ title, description, teamKey, parentId, labelNames }) => {
-        const client = getClient();
+        const client = await getClient();
         const teams = await client.teams({
           filter: { key: { eq: teamKey } },
         });
