@@ -10,8 +10,9 @@ import {
 } from "@/lib/db/linear-pollers";
 
 const patchSchema = z.object({
+  mode: z.enum(["pickup", "triage"]).optional(),
   pickupState: z.string().min(1).max(80).optional(),
-  inProgressState: z.string().min(1).max(80).optional(),
+  inProgressState: z.string().min(1).max(80).nullable().optional(),
   agentConfigId: z.string().min(1).optional(),
   labelOverride: z.string().max(80).nullable().optional(),
   workflowTemplate: z.string().max(20_000).nullable().optional(),
@@ -54,6 +55,16 @@ export async function PATCH(
   }
   const d = parsed.data;
   const patch: Record<string, unknown> = {};
+  if (d.mode !== undefined) {
+    patch.mode = d.mode;
+    // When flipping a rule into triage, force inProgressState to null —
+    // it'd be ignored at runtime anyway, but keeping it makes the row
+    // misleading in the UI. Caller can also send inProgressState=null
+    // explicitly; either path lands on the same state.
+    if (d.mode === "triage" && d.inProgressState === undefined) {
+      patch.inProgressState = null;
+    }
+  }
   if (d.pickupState !== undefined) patch.pickupState = d.pickupState;
   if (d.inProgressState !== undefined)
     patch.inProgressState = d.inProgressState;

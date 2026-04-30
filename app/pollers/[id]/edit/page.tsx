@@ -50,6 +50,7 @@ export default async function EditPollerPage({
         agents={agents.map((a) => ({ id: a.id, name: a.name, slug: a.slug }))}
         rules={rules.map((r) => ({
           id: r.id,
+          mode: r.mode,
           pickupState: r.pickupState,
           inProgressState: r.inProgressState,
           agentConfigId: r.agentConfigId,

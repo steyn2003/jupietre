@@ -8,13 +8,27 @@ import {
   listRulesForPoller,
 } from "@/lib/db/linear-pollers";
 
-const createSchema = z.object({
-  pickupState: z.string().min(1).max(80),
-  inProgressState: z.string().min(1).max(80),
-  agentConfigId: z.string().min(1),
-  labelOverride: z.string().max(80).nullable().optional(),
-  workflowTemplate: z.string().max(20_000).nullable().optional(),
-});
+const createSchema = z
+  .object({
+    mode: z.enum(["pickup", "triage"]).default("pickup"),
+    pickupState: z.string().min(1).max(80),
+    // Pickup needs an in-progress state. Triage does not — the agent
+    // decides where to move the ticket. We refine below.
+    inProgressState: z.string().min(1).max(80).nullable().optional(),
+    agentConfigId: z.string().min(1),
+    labelOverride: z.string().max(80).nullable().optional(),
+    workflowTemplate: z.string().max(20_000).nullable().optional(),
+  })
+  .refine(
+    (d) =>
+      d.mode === "triage" ||
+      (typeof d.inProgressState === "string" &&
+        d.inProgressState.length > 0),
+    {
+      path: ["inProgressState"],
+      message: "inProgressState is required for pickup-mode rules",
+    },
+  );
 
 export async function GET(
   _req: NextRequest,
@@ -56,8 +70,9 @@ export async function POST(
   try {
     const row = await createRule({
       pollerId: id,
+      mode: d.mode,
       pickupState: d.pickupState,
-      inProgressState: d.inProgressState,
+      inProgressState: d.mode === "triage" ? null : d.inProgressState ?? null,
       agentConfigId: d.agentConfigId,
       labelOverride: d.labelOverride ?? null,
       workflowTemplate: d.workflowTemplate ?? null,

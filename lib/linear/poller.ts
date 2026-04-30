@@ -17,7 +17,7 @@ import {
 import { listAllRepos, type Repo } from "@/lib/repos/manager";
 import { provisionWorktree } from "@/lib/worktrees/manager";
 import { startTurn } from "@/lib/agent/runner";
-import { defaultWorkflowForSlug } from "./default-workflows";
+import { defaultWorkflowForRule } from "./default-workflows";
 import { seedFromEnvIfEmpty } from "./seed-from-env";
 
 interface ResolvedRule {
@@ -144,14 +144,30 @@ async function pollOnce(entry: PollerWithRules): Promise<void> {
   const repoMap = await buildRepoMap();
 
   for (const cfg of resolved) {
+    const isTriage = cfg.rule.mode === "triage";
+    // Triage: scan the state with no label filter — the whole point is the
+    // agent gets to see every ticket and decide. Pickup: classic state +
+    // label filter.
     const filter: Record<string, unknown> = {
       state: { name: { eqIgnoreCase: cfg.rule.pickupState } },
-      labels: { some: { name: { eqIgnoreCase: cfg.effectiveLabel } } },
     };
+    if (!isTriage) {
+      filter.labels = {
+        some: { name: { eqIgnoreCase: cfg.effectiveLabel } },
+      };
+    }
     if (poller.teamKey) {
       filter.team = { key: { eq: poller.teamKey } };
     }
     const issues = await client.issues({ filter });
+
+    // Triage skips anything carrying the poller's defaultLabel (those belong
+    // to pickup rules) or "needs-human" (already flagged for human review by
+    // a previous triage run — re-triaging would loop).
+    const triageSkipLabels = new Set([
+      poller.defaultLabel.toLowerCase(),
+      "needs-human",
+    ]);
 
     for (const issue of issues.nodes) {
       // Gate per-(issue, agent), not per-issue. The same Linear ticket flows
@@ -175,10 +191,10 @@ async function pollOnce(entry: PollerWithRules): Promise<void> {
       )[0];
       if (liveOnAnyAgent) continue;
 
-      // (b) If THIS agent's last session for this issue was created very
-      //     recently (within the cooldown), the ticket hasn't actually
-      //     re-transitioned into our pickup state — Linear just hasn't moved
-      //     on yet. Skip to avoid the same agent looping on its own residue.
+      // (b) Per-agent cooldown — for pickup, prevents looping when Linear
+      //     hasn't yet propagated our state move; for triage, prevents the
+      //     same agent re-triaging immediately after a failed run that
+      //     didn't change labels/state.
       const lastForThisAgent = (
         await db
           .select({
@@ -205,6 +221,16 @@ async function pollOnce(entry: PollerWithRules): Promise<void> {
       const issueLabels = (await issue.labels()).nodes.map((l) =>
         l.name.toLowerCase(),
       );
+
+      // Triage exclusion set — handled at the in-memory step because the
+      // Linear `issues` filter API does not support a "labels NOT IN" form.
+      if (
+        isTriage &&
+        issueLabels.some((l) => triageSkipLabels.has(l))
+      ) {
+        continue;
+      }
+
       let repo: Repo | undefined;
       for (const lbl of issueLabels) {
         const r = repoMap.get(lbl);
@@ -213,7 +239,9 @@ async function pollOnce(entry: PollerWithRules): Promise<void> {
           break;
         }
       }
-      if (!repo) {
+      if (!repo && !isTriage) {
+        // Pickup: a repo label is required because the agent will check out a
+        // worktree and ship code. Skip and move on.
         console.warn(
           `[linear:${poller.name}] ${issue.identifier} has no label matching a registered repo (slugs: ${Array.from(
             repoMap.keys(),
@@ -221,26 +249,54 @@ async function pollOnce(entry: PollerWithRules): Promise<void> {
         );
         continue;
       }
-      const repoPath = repo.clonePath;
-      const repoLabel = repo.slug;
-
-      try {
-        const team = await issue.team;
-        if (team) {
-          const states = await team.states();
-          const target = states.nodes.find(
-            (s) =>
-              s.name.toLowerCase() === cfg.rule.inProgressState.toLowerCase(),
+      // Triage: a repo label is OPTIONAL. The triage agent reads broadly and
+      // typically decides which repo to apply via a label. If we found one,
+      // use it as the cwd; otherwise fall back to the registered-repos parent
+      // dir so Read/Grep still resolve.
+      let repoPath: string;
+      let repoLabel: string;
+      let repoId: string | null;
+      if (repo) {
+        repoPath = repo.clonePath;
+        repoLabel = repo.slug;
+        repoId = repo.id;
+      } else {
+        const path = await import("node:path");
+        const anyRepo = Array.from(repoMap.values())[0];
+        // No registered repos at all → triage agent has nothing to inspect.
+        if (!anyRepo) {
+          console.warn(
+            `[linear:${poller.name}] no registered repos — triage of ${issue.identifier} skipped`,
           );
-          if (target) {
-            await client.updateIssue(issue.id, { stateId: target.id });
-          }
+          continue;
         }
-      } catch (err) {
-        console.error(
-          `[linear:${poller.name}] Failed to move ${issue.identifier} to ${cfg.rule.inProgressState}:`,
-          err,
-        );
+        repoPath = path.dirname(anyRepo.clonePath);
+        repoLabel = "(triage)";
+        repoId = null;
+      }
+
+      // Pickup auto-transitions to the in-progress state. Triage doesn't —
+      // the agent decides where to move the ticket.
+      if (!isTriage && cfg.rule.inProgressState) {
+        try {
+          const team = await issue.team;
+          if (team) {
+            const states = await team.states();
+            const target = states.nodes.find(
+              (s) =>
+                s.name.toLowerCase() ===
+                cfg.rule.inProgressState!.toLowerCase(),
+            );
+            if (target) {
+              await client.updateIssue(issue.id, { stateId: target.id });
+            }
+          }
+        } catch (err) {
+          console.error(
+            `[linear:${poller.name}] Failed to move ${issue.identifier} to ${cfg.rule.inProgressState}:`,
+            err,
+          );
+        }
       }
 
       const sessionId = nanoid();
@@ -253,45 +309,63 @@ async function pollOnce(entry: PollerWithRules): Promise<void> {
         title,
         repoLabel,
         repoPath,
-        repoId: repo.id,
+        repoId,
         source: "linear",
         linearIssueId: issue.identifier,
         linearPollerId: poller.id,
         status: "idle",
       });
 
-      try {
-        const wt = await provisionWorktree({
-          sourceRepoPath: repoPath,
-          sessionId,
-          baseBranch: repo.defaultBranch,
-        });
-        await db
-          .update(sessions)
-          .set({
-            worktreePath: wt.worktreePath,
-            worktreeBranch: wt.worktreeBranch,
-            baseSha: wt.baseSha,
+      // Pickup spawns a worktree because the agent will commit + push.
+      // Triage doesn't write code — it reads, labels, transitions. No
+      // worktree saves provisioning time and disk churn.
+      if (!isTriage && repo) {
+        try {
+          const wt = await provisionWorktree({
+            sourceRepoPath: repoPath,
+            sessionId,
             baseBranch: repo.defaultBranch,
-          })
-          .where(eq(sessions.id, sessionId));
-      } catch (err) {
-        console.warn(
-          `[linear:${poller.name}] worktree provisioning failed for ${issue.identifier}; running against clone:`,
-          err,
-        );
+          });
+          await db
+            .update(sessions)
+            .set({
+              worktreePath: wt.worktreePath,
+              worktreeBranch: wt.worktreeBranch,
+              baseSha: wt.baseSha,
+              baseBranch: repo.defaultBranch,
+            })
+            .where(eq(sessions.id, sessionId));
+        } catch (err) {
+          console.warn(
+            `[linear:${poller.name}] worktree provisioning failed for ${issue.identifier}; running against clone:`,
+            err,
+          );
+        }
       }
 
       const workflow =
-        cfg.rule.workflowTemplate ?? defaultWorkflowForSlug(cfg.agent.slug);
+        cfg.rule.workflowTemplate ??
+        defaultWorkflowForRule(cfg.rule.mode, cfg.agent.slug);
       const priorContext = await buildPriorContext(
         issue.identifier,
         cfg.agent.id,
       );
+      // Triage mode: surface the registered-repo catalogue so the agent can
+      // pick the right repo label, even when none is on the ticket yet.
+      const repoCatalogue = isTriage
+        ? `\nRegistered repos (apply one of these slugs as a label when triage outcome is "make pickup-eligible"):\n${
+            Array.from(repoMap.values())
+              .map((r) => `  - ${r.slug}  (${r.githubRepo})`)
+              .join("\n") || "  (none registered)"
+          }\n\nDefault pickup label: \`${poller.defaultLabel}\` — apply this in addition to the repo label.\n`
+        : "";
+
       const firstMessage =
         `Linear ticket ${issue.identifier}: ${issue.title}\n\n` +
         `Description:\n${issue.description ?? "(no description)"}\n\n` +
-        `Repo working directory: ${repoPath}\n\n` +
+        `Repo working directory: ${repoPath}\n` +
+        repoCatalogue +
+        "\n" +
         (priorContext ? priorContext + "\n\n" : "") +
         workflow +
         `\n\nThis ticket was triggered from the Linear poller. All progress, ` +
@@ -300,7 +374,7 @@ async function pollOnce(entry: PollerWithRules): Promise<void> {
         `operator to observe; Linear is the source of truth for the ticket.`;
 
       console.log(
-        `[linear:${poller.name}] Created session for ${issue.identifier} (${cfg.agent.slug}) in ${repoLabel}`,
+        `[linear:${poller.name}] ${cfg.rule.mode === "triage" ? "Triage" : "Pickup"} session for ${issue.identifier} (${cfg.agent.slug}) in ${repoLabel}`,
       );
       void startTurn({ sessionId, userText: firstMessage });
     }

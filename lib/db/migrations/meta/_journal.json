@@ -29,6 +29,13 @@
       "when": 1777539129707,
       "tag": "0003_wakeful_prowler",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1777582671477,
+      "tag": "0004_volatile_true_believers",
+      "breakpoints": true
     }
   ]
 }

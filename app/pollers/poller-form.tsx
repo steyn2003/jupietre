@@ -24,10 +24,13 @@ export interface AgentOption {
   slug: string;
 }
 
+export type RuleMode = "pickup" | "triage";
+
 export interface RuleRow {
   id: string;
+  mode: RuleMode;
   pickupState: string;
-  inProgressState: string;
+  inProgressState: string | null;
   agentConfigId: string;
   labelOverride: string | null;
   workflowTemplate: string | null;
@@ -241,6 +244,7 @@ function RulesEditor({
   const [adding, setAdding] = useState(false);
 
   // ─── new-rule draft ────────────────────────────────────────────────
+  const [draftMode, setDraftMode] = useState<RuleMode>("pickup");
   const [draftPickup, setDraftPickup] = useState("");
   const [draftInProgress, setDraftInProgress] = useState("");
   const [draftAgent, setDraftAgent] = useState(agents[0]?.id ?? "");
@@ -250,8 +254,12 @@ function RulesEditor({
 
   async function handleAdd() {
     setDraftError(null);
-    if (!draftPickup || !draftInProgress || !draftAgent) {
-      setDraftError("Pickup state, in-progress state, and agent are required.");
+    if (!draftPickup || !draftAgent) {
+      setDraftError("Pickup state and agent are required.");
+      return;
+    }
+    if (draftMode === "pickup" && !draftInProgress) {
+      setDraftError("In-progress state is required for pickup rules.");
       return;
     }
     setAdding(true);
@@ -260,10 +268,16 @@ function RulesEditor({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          mode: draftMode,
           pickupState: draftPickup,
-          inProgressState: draftInProgress,
+          inProgressState:
+            draftMode === "triage" ? null : draftInProgress,
           agentConfigId: draftAgent,
-          labelOverride: draftLabelOverride.trim() || null,
+          // Triage has no per-rule label filter (it scans everything).
+          labelOverride:
+            draftMode === "triage"
+              ? null
+              : draftLabelOverride.trim() || null,
           workflowTemplate: draftWorkflow.trim() || null,
         }),
       });
@@ -276,6 +290,7 @@ function RulesEditor({
       }
       const data = (await res.json()) as { rule: RuleRow };
       setRows((r) => [...r, data.rule]);
+      setDraftMode("pickup");
       setDraftPickup("");
       setDraftInProgress("");
       setDraftLabelOverride("");
@@ -338,12 +353,17 @@ function RulesEditor({
             Status → agent rules
           </h2>
           <p className="text-[12px] text-fg-muted mt-1 leading-relaxed">
-            When an issue with label{" "}
-            <code className="font-mono">{defaultLabel}</code> sits in the pickup
-            state, the configured agent picks it up and the rule&apos;s
-            workflow text is injected into the agent&apos;s first message.
-            Leave the workflow blank to use the slug-based default
-            (PM/Engineer/QA).
+            <strong className="text-fg">Pickup</strong> rules: an issue with
+            label <code className="font-mono">{defaultLabel}</code> in the
+            pickup state is handed to the agent, which is auto-moved to the
+            in-progress state.
+            <br />
+            <strong className="text-fg">Triage</strong> rules: the agent sees
+            every issue in the pickup state (no label filter) and decides what
+            labels and state to apply. Tickets already carrying{" "}
+            <code className="font-mono">{defaultLabel}</code> or{" "}
+            <code className="font-mono">needs-human</code> are skipped — they
+            already have a destination.
           </p>
         </div>
 
@@ -368,23 +388,43 @@ function RulesEditor({
 
         <div className="rounded-xl ring-1 ring-hairline bg-surface-2/50 p-4 space-y-3">
           <h3 className="text-[13px] font-medium text-fg">Add rule</h3>
+          <ModeRadio value={draftMode} onChange={setDraftMode} />
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Pickup state" htmlFor="pickup" required>
+            <Field
+              label={draftMode === "triage" ? "State to scan" : "Pickup state"}
+              htmlFor="pickup"
+              required
+            >
               <Input
                 id="pickup"
                 value={draftPickup}
                 onChange={(e) => setDraftPickup(e.target.value)}
-                placeholder="Ready for PM"
+                placeholder={draftMode === "triage" ? "Todo" : "Ready for PM"}
               />
             </Field>
-            <Field label="In-progress state" htmlFor="ip" required>
-              <Input
-                id="ip"
-                value={draftInProgress}
-                onChange={(e) => setDraftInProgress(e.target.value)}
-                placeholder="In Progress (PM)"
-              />
-            </Field>
+            {draftMode === "pickup" ? (
+              <Field label="In-progress state" htmlFor="ip" required>
+                <Input
+                  id="ip"
+                  value={draftInProgress}
+                  onChange={(e) => setDraftInProgress(e.target.value)}
+                  placeholder="In Progress (PM)"
+                />
+              </Field>
+            ) : (
+              <Field
+                label="In-progress state"
+                htmlFor="ip"
+                description="Triage agent decides — no auto-transition."
+              >
+                <Input
+                  id="ip"
+                  value=""
+                  disabled
+                  placeholder="(agent decides)"
+                />
+              </Field>
+            )}
             <Field label="Agent" htmlFor="agent" required>
               <Select
                 id="agent"
@@ -399,31 +439,54 @@ function RulesEditor({
                 ))}
               </Select>
             </Field>
-            <Field
-              label="Label override"
-              htmlFor="lo"
-              description="Blank = inherit poller default."
-            >
-              <Input
-                id="lo"
-                value={draftLabelOverride}
-                onChange={(e) => setDraftLabelOverride(e.target.value)}
-                className="font-mono"
-                placeholder={defaultLabel}
-              />
-            </Field>
+            {draftMode === "pickup" ? (
+              <Field
+                label="Label override"
+                htmlFor="lo"
+                description="Blank = inherit poller default."
+              >
+                <Input
+                  id="lo"
+                  value={draftLabelOverride}
+                  onChange={(e) => setDraftLabelOverride(e.target.value)}
+                  className="font-mono"
+                  placeholder={defaultLabel}
+                />
+              </Field>
+            ) : (
+              <Field
+                label="Label filter"
+                htmlFor="lo"
+                description="Triage scans every ticket in the state."
+              >
+                <Input
+                  id="lo"
+                  value="(none — agent sees all)"
+                  disabled
+                  className="font-mono"
+                />
+              </Field>
+            )}
           </div>
           <Field
             label="Workflow text (optional)"
             htmlFor="wf"
-            description="Leave blank to use the default keyed by the agent's slug."
+            description={
+              draftMode === "triage"
+                ? "Blank = built-in triage workflow (read → size → decide one outcome)."
+                : "Blank = role default keyed by the agent's slug."
+            }
           >
             <Textarea
               id="wf"
               rows={5}
               value={draftWorkflow}
               onChange={(e) => setDraftWorkflow(e.target.value)}
-              placeholder="## Workflow&#10;&#10;1. Picked up — comment with linear_add_comment …"
+              placeholder={
+                draftMode === "triage"
+                  ? "## Workflow (Triage)\n\n1. Read — linear_get_issue …"
+                  : "## Workflow\n\n1. Picked up — comment with linear_add_comment …"
+              }
               className="font-mono text-[12px]"
             />
           </Field>
@@ -461,38 +524,67 @@ function RuleEditableRow({
   onSave: (patch: Partial<RuleRow>) => Promise<void>;
   onDelete: () => Promise<void>;
 }) {
+  const [mode, setMode] = useState<RuleMode>(rule.mode);
   const [pickupState, setPickupState] = useState(rule.pickupState);
-  const [inProgressState, setInProgressState] = useState(rule.inProgressState);
+  const [inProgressState, setInProgressState] = useState(
+    rule.inProgressState ?? "",
+  );
   const [agentConfigId, setAgentConfigId] = useState(rule.agentConfigId);
   const [labelOverride, setLabelOverride] = useState(rule.labelOverride ?? "");
   const [workflowTemplate, setWorkflowTemplate] = useState(
     rule.workflowTemplate ?? "",
   );
 
+  const isTriage = mode === "triage";
+
+  // For dirty-tracking, normalize triage's empty in-progress / label-override
+  // to null so saving doesn't ping-pong between "" and null.
+  const normalizedInProgress = isTriage ? null : inProgressState || null;
+  const normalizedLabelOverride = isTriage ? null : labelOverride || null;
   const dirty =
+    mode !== rule.mode ||
     pickupState !== rule.pickupState ||
-    inProgressState !== rule.inProgressState ||
+    normalizedInProgress !== rule.inProgressState ||
     agentConfigId !== rule.agentConfigId ||
-    (labelOverride || null) !== rule.labelOverride ||
+    normalizedLabelOverride !== rule.labelOverride ||
     (workflowTemplate || null) !== rule.workflowTemplate;
 
   return (
     <li className="rounded-xl ring-1 ring-hairline bg-surface-1 p-4 space-y-3">
+      <ModeRadio value={mode} onChange={setMode} idSuffix={rule.id} />
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Pickup state" htmlFor={`p-${rule.id}`}>
+        <Field
+          label={isTriage ? "State to scan" : "Pickup state"}
+          htmlFor={`p-${rule.id}`}
+        >
           <Input
             id={`p-${rule.id}`}
             value={pickupState}
             onChange={(e) => setPickupState(e.target.value)}
           />
         </Field>
-        <Field label="In-progress state" htmlFor={`i-${rule.id}`}>
-          <Input
-            id={`i-${rule.id}`}
-            value={inProgressState}
-            onChange={(e) => setInProgressState(e.target.value)}
-          />
-        </Field>
+        {isTriage ? (
+          <Field
+            label="In-progress state"
+            htmlFor={`i-${rule.id}`}
+            description="Triage agent decides — no auto-transition."
+          >
+            <Input
+              id={`i-${rule.id}`}
+              value=""
+              disabled
+              placeholder="(agent decides)"
+            />
+          </Field>
+        ) : (
+          <Field label="In-progress state" htmlFor={`i-${rule.id}`}>
+            <Input
+              id={`i-${rule.id}`}
+              value={inProgressState}
+              onChange={(e) => setInProgressState(e.target.value)}
+            />
+          </Field>
+        )}
         <Field label="Agent" htmlFor={`a-${rule.id}`}>
           <Select
             id={`a-${rule.id}`}
@@ -506,23 +598,42 @@ function RuleEditableRow({
             ))}
           </Select>
         </Field>
-        <Field
-          label="Label override"
-          htmlFor={`l-${rule.id}`}
-          description="Blank = inherit"
-        >
-          <Input
-            id={`l-${rule.id}`}
-            value={labelOverride}
-            onChange={(e) => setLabelOverride(e.target.value)}
-            className="font-mono"
-          />
-        </Field>
+        {isTriage ? (
+          <Field
+            label="Label filter"
+            htmlFor={`l-${rule.id}`}
+            description="Triage scans every ticket in the state."
+          >
+            <Input
+              id={`l-${rule.id}`}
+              value="(none — agent sees all)"
+              disabled
+              className="font-mono"
+            />
+          </Field>
+        ) : (
+          <Field
+            label="Label override"
+            htmlFor={`l-${rule.id}`}
+            description="Blank = inherit"
+          >
+            <Input
+              id={`l-${rule.id}`}
+              value={labelOverride}
+              onChange={(e) => setLabelOverride(e.target.value)}
+              className="font-mono"
+            />
+          </Field>
+        )}
       </div>
       <Field
         label="Workflow text"
         htmlFor={`w-${rule.id}`}
-        description="Blank = default for this agent's slug"
+        description={
+          isTriage
+            ? "Blank = built-in triage workflow."
+            : "Blank = default for this agent's slug."
+        }
       >
         <Textarea
           id={`w-${rule.id}`}
@@ -551,10 +662,11 @@ function RuleEditableRow({
           loading={busy}
           onClick={() =>
             onSave({
+              mode,
               pickupState,
-              inProgressState,
+              inProgressState: normalizedInProgress,
               agentConfigId,
-              labelOverride: labelOverride || null,
+              labelOverride: normalizedLabelOverride,
               workflowTemplate: workflowTemplate || null,
             })
           }
@@ -563,6 +675,66 @@ function RuleEditableRow({
         </Button>
       </div>
     </li>
+  );
+}
+
+function ModeRadio({
+  value,
+  onChange,
+  idSuffix,
+}: {
+  value: RuleMode;
+  onChange: (v: RuleMode) => void;
+  idSuffix?: string;
+}) {
+  const name = `rule-mode-${idSuffix ?? "draft"}`;
+  return (
+    <div className="flex flex-wrap gap-2">
+      {(
+        [
+          {
+            value: "pickup" as const,
+            label: "Pickup",
+            hint: "label + state → run agent",
+          },
+          {
+            value: "triage" as const,
+            label: "Triage",
+            hint: "agent sees all, decides",
+          },
+        ]
+      ).map((o) => {
+        const active = value === o.value;
+        return (
+          <label
+            key={o.value}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-full px-3.5 h-9 text-[13px] cursor-pointer",
+              "ring-1 transition-colors duration-150",
+              active
+                ? "bg-accent-soft text-accent ring-[color:var(--accent-soft)]"
+                : "bg-surface-2 text-fg-muted ring-hairline hover:text-fg",
+            )}
+          >
+            <input
+              type="radio"
+              name={name}
+              checked={active}
+              onChange={() => onChange(o.value)}
+              className="sr-only"
+            />
+            <span
+              className={cn(
+                "h-2 w-2 rounded-full transition-colors",
+                active ? "bg-accent" : "bg-fg-subtle",
+              )}
+            />
+            {o.label}
+            <span className="text-[11px] text-fg-subtle">— {o.hint}</span>
+          </label>
+        );
+      })}
+    </div>
   );
 }
 

@@ -509,27 +509,41 @@ export const linearPollerRules = pgTable(
     pollerId: text("poller_id")
       .notNull()
       .references(() => linearPollers.id, { onDelete: "cascade" }),
-    /** Linear state name to pick up issues from (e.g. "Ready for PM"). */
+    /** pickup: classic "state X + label Y → run agent Z, auto-move to W."
+     *  triage: scan state X with no label filter (excluding tickets that
+     *  already carry the poller's defaultLabel — those belong to pickup
+     *  rules); the agent decides what labels/state to apply. There is no
+     *  auto-transition in triage mode, so inProgressState is unused. */
+    mode: text("mode", { enum: ["pickup", "triage"] })
+      .notNull()
+      .default("pickup"),
+    /** Linear state name to scan for tickets (e.g. "Ready for PM" for
+     *  pickup rules, or "Todo" for a triage rule). */
     pickupState: text("pickup_state").notNull(),
-    /** State to move issues into the moment a session is created. */
-    inProgressState: text("in_progress_state").notNull(),
+    /** Pickup mode: state to move issues into the moment a session is
+     *  created. Null when mode='triage' (the agent decides). */
+    inProgressState: text("in_progress_state"),
     agentConfigId: text("agent_config_id")
       .notNull()
       .references(() => agentConfigs.id, { onDelete: "restrict" }),
-    /** Override the poller-level label filter for this rule. Null = inherit. */
+    /** Pickup mode: override the poller-level label filter for this rule
+     *  (null = inherit poller.defaultLabel). Ignored in triage mode. */
     labelOverride: text("label_override"),
     /** Role-specific instructions injected into the agent's first message.
-     *  Null falls back to the default keyed by the agent's slug (PM/Engineer/QA). */
+     *  Null falls back to the default keyed by mode + agent slug. */
     workflowTemplate: text("workflow_template"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (t) => [
     index("linear_poller_rules_poller_idx").on(t.pollerId),
-    // One agent should only be wired once per (poller, pickupState). Lets the
-    // manager loop be deterministic and the UI surface "this rule already exists".
+    // (poller, mode, pickupState, agent) is the dedupe key. mode is part of
+    // the key so an operator can wire the same agent against the same state
+    // in both modes — e.g. a triage agent and a pickup agent both watching
+    // "Todo" — without the index colliding.
     uniqueIndex("linear_poller_rules_dedupe_idx").on(
       t.pollerId,
+      t.mode,
       t.pickupState,
       t.agentConfigId,
     ),

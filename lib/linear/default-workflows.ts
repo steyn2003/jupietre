@@ -134,6 +134,39 @@ export const GENERIC_WORKFLOW = `## Workflow
 
 This ticket was triggered by the Linear poller. Use the linear_* tools to read the ticket, push your output back to Linear (description updates and/or comments), and call linear_update_issue_state to move the ticket to the correct next state when you finish. Do not return findings only in chat.`;
 
+export const TRIAGE_WORKFLOW = `## Workflow (Triage)
+
+You are scanning new tickets for triage. Pickup pollers handle work that's already been blessed for an agent — your job is to get the right tickets INTO that pool with the right metadata, push the rest somewhere they belong, and never touch them again.
+
+You will be invoked once per ticket. Use the available tools (graphify_query, Read, Grep, etc.) to size the work in the linked repo if relevant.
+
+For this ticket:
+
+1. **Read** — linear_get_issue. Note state, labels, description, recent comments.
+
+2. **Size and inspect** — if the ticket points at a registered repo, use graphify_query / Read / Grep on that repo to estimate scope: 1 file, 5 files, 50 files? Are there obvious blockers (auth changes, infra, breaking API)? Keep this brief — you have a few hundred tokens of work, not a full investigation.
+
+3. **Decide ONE outcome** — leaving the ticket alone is FORBIDDEN. The same poll will hit it again tomorrow and you'd loop. Pick exactly one:
+
+   **(a) Make it pickup-eligible** — the ticket is well-defined, repo is identifiable, sized appropriately for a single agent run:
+   - linear_update_issue with labelNames including the repo's slug AND \`agent\` (or whatever the poller's defaultLabel is — confirm via the operator's config if unsure).
+   - linear_update_issue_state to the team's pickup state for the next agent in the chain (typically "Ready for PM"). Read available states first via linear_get_issue → look at the issue's team states.
+
+   **(b) Backlog it** — too big, too vague, or not currently actionable:
+   - linear_add_comment explaining why in 1-2 sentences.
+   - linear_update_issue_state to "Backlog" (or whatever your team calls it).
+
+   **(c) Flag for human** — you genuinely can't decide:
+   - linear_update_issue appending the \`needs-human\` label to the existing labels.
+   - linear_add_comment with the specific question that's blocking you.
+
+4. **Verify** — call linear_get_issue once more. Confirm your label/state change actually landed. If it didn't, retry the update.
+
+## Hard rules
+- NEVER call linear_create_issue. You triage existing tickets; you do not create new ones. Creating a "tracking issue" because you can't find the original is also forbidden — that's a bug to surface, not a workaround.
+- One outcome per ticket. Don't also assign people, don't also create sub-issues, don't also write code. That's not your job here.
+- A ticket left in the same state with the same labels is a triage failure. The next poll WILL re-trigger you.`;
+
 export function defaultWorkflowForSlug(slug: string): string {
   switch (slug) {
     case "pm":
@@ -146,4 +179,19 @@ export function defaultWorkflowForSlug(slug: string): string {
     default:
       return GENERIC_WORKFLOW;
   }
+}
+
+/**
+ * Pick the right default workflow text for a (mode, slug) pair.
+ *  - Triage rules use the same TRIAGE_WORKFLOW regardless of which agent is
+ *    wired to them — the agent's identity matters less than the action being
+ *    "scan + label + transition," which is the same job every time.
+ *  - Pickup rules use the role-specific text keyed by agent slug.
+ */
+export function defaultWorkflowForRule(
+  mode: "pickup" | "triage",
+  slug: string,
+): string {
+  if (mode === "triage") return TRIAGE_WORKFLOW;
+  return defaultWorkflowForSlug(slug);
 }
