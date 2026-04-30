@@ -22,6 +22,13 @@
       "when": 1777535629932,
       "tag": "0002_naive_darkhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1777539129707,
+      "tag": "0003_wakeful_prowler",
+      "breakpoints": true
     }
   ]
 }

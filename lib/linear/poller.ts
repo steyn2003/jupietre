@@ -256,6 +256,7 @@ async function pollOnce(entry: PollerWithRules): Promise<void> {
         repoId: repo.id,
         source: "linear",
         linearIssueId: issue.identifier,
+        linearPollerId: poller.id,
         status: "idle",
       });
 

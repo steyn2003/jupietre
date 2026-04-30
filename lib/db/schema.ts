@@ -204,6 +204,12 @@ export const sessions = pgTable(
       .default("ui"),
     /** Linear issue identifier (e.g. "ENG-123") when source=linear */
     linearIssueId: text("linear_issue_id"),
+    /** When source=linear, the poller that picked up this issue. The Linear
+     *  MCP tools use this poller's API key when the session calls linear_*
+     *  tools, so the agent talks to the workspace the issue actually came
+     *  from (instead of "first enabled poller", which silently picks the
+     *  wrong workspace when more than one poller is configured). */
+    linearPollerId: text("linear_poller_id"),
     /** The Claude Agent SDK session id so we can `resume` across turns */
     sdkSessionId: text("sdk_session_id"),
     /** HEAD SHA captured on the first turn; used for `git log baseSha..HEAD` */

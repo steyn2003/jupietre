@@ -1,22 +1,55 @@
 import "server-only";
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { LinearClient } from "@linear/sdk";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { db } from "@/lib/db/client";
+import { sessions } from "@/lib/db/schema";
 import { recordArtifact } from "@/lib/db/artifacts";
-import { firstEnabledPollerApiKey } from "@/lib/db/linear-pollers";
+import {
+  firstEnabledPollerApiKey,
+  getPollerById,
+} from "@/lib/db/linear-pollers";
 
-async function getClient(): Promise<LinearClient> {
-  // Prefer an enabled poller's API key (configured in /pollers). Fall back to
-  // LINEAR_API_KEY env for instances that haven't migrated yet or where the
-  // tools are used outside of any configured poller.
-  const fromDb = await firstEnabledPollerApiKey();
-  const apiKey = fromDb ?? process.env.LINEAR_API_KEY;
-  if (!apiKey) {
+/**
+ * Resolve which Linear API key this session should call with.
+ *
+ * Order of precedence:
+ *   1. The poller that originated this session (sessions.linearPollerId).
+ *      Critical: prevents cross-workspace mixups when more than one poller
+ *      is configured — the agent must talk to the workspace the issue came
+ *      from, not "whichever poller was enabled first".
+ *   2. The first enabled poller (for manual UI sessions where the agent has
+ *      `enableLinearTools=1` but isn't bound to any specific workspace).
+ *   3. The LINEAR_API_KEY env var (legacy / pre-migration fallback).
+ */
+async function getClient(sessionId: string): Promise<LinearClient> {
+  const sessionRow = (
+    await db
+      .select({ linearPollerId: sessions.linearPollerId })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1)
+  )[0];
+
+  if (sessionRow?.linearPollerId) {
+    const poller = await getPollerById(sessionRow.linearPollerId);
+    if (poller?.enabled) {
+      return new LinearClient({ apiKey: poller.apiKey });
+    }
+    // Poller was deleted or disabled after the session was created. Fall
+    // through to the broader fallback rather than failing — the operator
+    // probably meant for the session to keep working.
+  }
+
+  const fallback =
+    (await firstEnabledPollerApiKey()) ?? process.env.LINEAR_API_KEY;
+  if (!fallback) {
     throw new Error(
       "No Linear API key configured. Add a poller in /pollers or set LINEAR_API_KEY.",
     );
   }
-  return new LinearClient({ apiKey });
+  return new LinearClient({ apiKey: fallback });
 }
 
 export function buildLinearTools(sessionId: string) {
@@ -30,7 +63,7 @@ export function buildLinearTools(sessionId: string) {
           .describe("Issue ID (UUID) or identifier (e.g. ENG-123)"),
       },
       async ({ issueId }) => {
-        const client = await getClient();
+        const client = await getClient(sessionId);
         const issue = await client.issue(issueId);
         const state = await issue.state;
         const labels = await issue.labels();
@@ -71,7 +104,7 @@ export function buildLinearTools(sessionId: string) {
           ),
       },
       async ({ issueId, stateName }) => {
-        const client = await getClient();
+        const client = await getClient(sessionId);
         const issue = await client.issue(issueId);
         const team = await issue.team;
         if (!team) throw new Error("Issue has no team");
@@ -107,7 +140,7 @@ export function buildLinearTools(sessionId: string) {
         body: z.string().describe("Comment body in markdown"),
       },
       async ({ issueId, body }) => {
-        const client = await getClient();
+        const client = await getClient(sessionId);
         const issue = await client.issue(issueId);
         const result = await client.createComment({
           issueId: issue.id,
@@ -153,7 +186,7 @@ export function buildLinearTools(sessionId: string) {
         labelNames: z.array(z.string()).optional(),
       },
       async ({ issueId, title, description, priority, labelNames }) => {
-        const client = await getClient();
+        const client = await getClient(sessionId);
         const issue = await client.issue(issueId);
 
         const update: Record<string, unknown> = {};
@@ -199,7 +232,7 @@ export function buildLinearTools(sessionId: string) {
         labelNames: z.array(z.string()).optional(),
       },
       async ({ title, description, teamKey, parentId, labelNames }) => {
-        const client = await getClient();
+        const client = await getClient(sessionId);
         const teams = await client.teams({
           filter: { key: { eq: teamKey } },
         });

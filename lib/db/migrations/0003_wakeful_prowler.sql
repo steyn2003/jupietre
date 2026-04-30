@@ -1,0 +1,1 @@
+ALTER TABLE "sessions" ADD COLUMN "linear_poller_id" text;
