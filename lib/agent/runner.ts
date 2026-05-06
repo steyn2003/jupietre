@@ -428,6 +428,24 @@ export async function startTurn(params: {
       console.log(
         `[runner] spawning agent: executable=${bunPath} cli=${claudePath ?? "(default)"} cwd=${cwd} agent=${config.name}`,
       );
+
+      // Materialize UI-managed skills into <cwd>/.claude/skills/ before the
+      // SDK reads project settings. The runtime fall-back order is:
+      //   - file-based skills/ folder gets copied first (sub-files included)
+      //   - DB-managed skills overwrite SKILL.md on slug collision
+      // Skipped silently when includeProjectSkills is off — that toggle means
+      // "don't read project sources at all," so writing files would be wasted.
+      if (config.includeProjectSkills) {
+        try {
+          const { materializeSkillsToWorktree } = await import(
+            "./materialize-skills"
+          );
+          await materializeSkillsToWorktree(cwd, row.ownerId ?? row.userId);
+        } catch (err) {
+          console.warn(`[runner] skill materialization failed:`, err);
+        }
+      }
+
       const built = buildSdkOptionsFromConfig(config, cwd);
       const options: Record<string, unknown> = {
         ...built,

@@ -21,6 +21,13 @@ export async function register() {
     console.error("[auth] Admin bootstrap failed:", err);
   });
 
+  // First-boot only: lift the file-based skills/ folder into the DB so the
+  // operator can edit them in /skills. No-op once any skill row exists.
+  const { seedSkillsFromFolderIfEmpty } = await import("@/lib/skills-seed");
+  await seedSkillsFromFolderIfEmpty().catch((err) => {
+    console.error("[skills] folder seed failed:", err);
+  });
+
   const { startLinearPoller } = await import("@/lib/linear/poller");
   startLinearPoller();
 

@@ -457,6 +457,47 @@ export const workflowRuns = pgTable(
 );
 
 // ────────────────────────────────────────────────────────────────────
+// Skills (UI-managed Claude Agent SDK skills)
+//
+// Skills used to live only in the repo's skills/ folder, surfaced to the SDK
+// via settingSources: ["user", "project"]. This table makes them editable in
+// the UI: each row is one Claude SKILL.md, materialized to the per-session
+// worktree at <worktreePath>/.claude/skills/<slug>/SKILL.md when the runner
+// builds the SDK options.
+//
+// Sub-files referenced from a SKILL.md (helpers, scripts) still live in the
+// repo's skills/ folder. The materialization step copies the folder first
+// and overlays the DB body on top, so DB rows are authoritative for SKILL.md
+// while the folder provides any auxiliary files.
+// ────────────────────────────────────────────────────────────────────
+
+export const skills = pgTable(
+  "skills",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Optional team scope — when set, all team members can use this skill. */
+    teamId: text("team_id").references(() => teams.id, {
+      onDelete: "set null",
+    }),
+    /** kebab-case, used as the directory name under .claude/skills/. */
+    slug: text("slug").notNull(),
+    /** Human label shown in the UI (also written to SKILL.md frontmatter). */
+    name: text("name").notNull(),
+    /** Skill-discovery hint shown to the agent. Required by the SDK to decide
+     *  when to load this skill. Written to SKILL.md frontmatter. */
+    description: text("description").notNull(),
+    /** Markdown body — everything after the frontmatter. */
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("skills_owner_slug_idx").on(t.ownerId, t.slug)],
+);
+
+// ────────────────────────────────────────────────────────────────────
 // Linear pollers (M-linear-ui)
 //
 // Each row in `linear_pollers` represents one polling loop bound to a Linear

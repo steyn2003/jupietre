@@ -13,6 +13,7 @@ import {
   FlowArrowIcon,
   PlayIcon,
   KanbanIcon,
+  BookOpenIcon,
 } from "@phosphor-icons/react";
 import { cn } from "@/components/ui/cn";
 
@@ -36,6 +37,12 @@ const NAV: NavItem[] = [
     label: "Agents",
     icon: <RobotIcon weight="regular" />,
     matchPrefix: "/agents",
+  },
+  {
+    href: "/skills",
+    label: "Skills",
+    icon: <BookOpenIcon weight="regular" />,
+    matchPrefix: "/skills",
   },
   {
     href: "/repos",
