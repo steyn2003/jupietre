@@ -30,6 +30,9 @@ export interface AudioRecorderControls {
   supported: boolean;
   recording: boolean;
   error: string | null;
+  /** Live mic input level, 0..1. Updated ~30x/s while recording. Useful as
+   *  a UI signal so the operator can see their voice is being picked up. */
+  level: number;
   /** Begin a new recording. Resolves once the mic is open. */
   start(): Promise<void>;
   /** Finish the current recording. Resolves with the captured blob. Returns
@@ -49,12 +52,16 @@ export function useAudioRecorder(): AudioRecorderControls {
   const [supported, setSupported] = useState(false);
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [level, setLevel] = useState(0);
 
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const stopResolverRef = useRef<((blob: Blob | null) => void) | null>(null);
   const mimeRef = useRef<string>("");
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyzerRef = useRef<AnalyserNode | null>(null);
+  const levelRafRef = useRef<number | null>(null);
 
   useEffect(() => {
     setSupported(
@@ -69,8 +76,57 @@ export function useAudioRecorder(): AudioRecorderControls {
         for (const track of stream.getTracks()) track.stop();
         streamRef.current = null;
       }
+      if (audioCtxRef.current) {
+        void audioCtxRef.current.close();
+        audioCtxRef.current = null;
+      }
+      if (levelRafRef.current !== null) {
+        cancelAnimationFrame(levelRafRef.current);
+        levelRafRef.current = null;
+      }
       recorderRef.current = null;
     };
+  }, []);
+
+  // Live mic level — RMS over a short FFT window. Cheap; no audio data is
+  // copied. Stops when no recorder is active so we don't burn battery.
+  const startLevelMeter = useCallback((stream: MediaStream) => {
+    if (!stream) return;
+    if (audioCtxRef.current) return; // already running
+    try {
+      const Ctx =
+        (window as unknown as { AudioContext?: typeof AudioContext })
+          .AudioContext ??
+        (window as unknown as { webkitAudioContext?: typeof AudioContext })
+          .webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+      audioCtxRef.current = ctx;
+      analyzerRef.current = analyser;
+
+      const buffer = new Uint8Array(analyser.fftSize);
+      const tick = () => {
+        const a = analyzerRef.current;
+        if (!a) return;
+        a.getByteTimeDomainData(buffer);
+        // RMS over the byte-domain (centered at 128). Map 0..~80 → 0..1.
+        let sum = 0;
+        for (let i = 0; i < buffer.length; i++) {
+          const v = (buffer[i] - 128) / 128;
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / buffer.length);
+        setLevel(Math.min(1, rms * 4));
+        levelRafRef.current = requestAnimationFrame(tick);
+      };
+      levelRafRef.current = requestAnimationFrame(tick);
+    } catch {
+      // AudioContext not allowed in this context — no level meter, fine.
+    }
   }, []);
 
   const start = useCallback(async () => {
@@ -86,9 +142,21 @@ export function useAudioRecorder(): AudioRecorderControls {
 
     try {
       if (!streamRef.current) {
+        // Disable Chrome's video-call-tuned audio processing — echo
+        // cancellation and noise suppression were trained against distant
+        // speakers and will gate too aggressively for dictation, swallowing
+        // whole words and producing the silent-audio Whisper hallucination
+        // ("Thanks for watching. Bye.") Auto-gain stays on so soft voices
+        // are still amplified.
         streamRef.current = await navigator.mediaDevices.getUserMedia({
-          audio: true,
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: true,
+            channelCount: 1,
+          },
         });
+        startLevelMeter(streamRef.current);
       }
       const mimeType = mimeRef.current || pickMimeType();
       mimeRef.current = mimeType;
@@ -155,5 +223,5 @@ export function useAudioRecorder(): AudioRecorderControls {
     });
   }, []);
 
-  return { supported, recording, error, start, stop };
+  return { supported, recording, error, level, start, stop };
 }

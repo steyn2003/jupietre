@@ -146,5 +146,34 @@ export async function POST(req: NextRequest): Promise<Response> {
     );
   }
 
+  // Whisper hallucinates these phrases when fed silent or unintelligible
+  // audio (it learned them from YouTube outros). Treat as empty rather than
+  // letting them become Linear tickets — saves the operator from filing
+  // "Thanks for watching" as an issue.
+  const HALLUCINATIONS = [
+    "thanks for watching",
+    "thank you for watching",
+    "subscribe to the channel",
+    "see you next time",
+    "see you in the next",
+    "music playing",
+    "[music]",
+    "[applause]",
+    "(silence)",
+    "you're welcome",
+  ];
+  const lower = text.toLowerCase();
+  const isShortHallucination =
+    text.length < 50 && HALLUCINATIONS.some((h) => lower.includes(h));
+  if (isShortHallucination) {
+    return Response.json(
+      {
+        error:
+          "Whisper returned only filler phrases — likely silent or too quiet. Check the mic level meter and try again.",
+      },
+      { status: 422 },
+    );
+  }
+
   return Response.json({ text });
 }

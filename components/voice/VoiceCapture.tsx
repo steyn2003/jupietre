@@ -402,6 +402,9 @@ export function VoiceCapture() {
                     whisper
                   </span>
                 ) : null}
+                {recorder.recording ? (
+                  <LevelMeter level={recorder.level} />
+                ) : null}
               </div>
               <div className="flex items-center gap-1">
                 <button
@@ -527,6 +530,33 @@ export function VoiceCapture() {
         ) : null}
       </AnimatePresence>
     </>
+  );
+}
+
+/**
+ * Tiny live audio-level indicator. 8 bars; how many are lit is proportional
+ * to the current RMS. Lets the operator see whether the mic is actually
+ * picking up their voice without opening the system audio panel.
+ */
+function LevelMeter({ level }: { level: number }) {
+  const bars = 8;
+  const lit = Math.round(level * bars);
+  return (
+    <span
+      className="inline-flex items-end gap-0.5 h-3"
+      aria-label={`Audio level ${Math.round(level * 100)}%`}
+    >
+      {Array.from({ length: bars }).map((_, i) => (
+        <span
+          key={i}
+          className={cn(
+            "w-0.5 rounded-sm transition-colors duration-75",
+            i < lit ? "bg-accent" : "bg-fg-subtle/40",
+          )}
+          style={{ height: `${30 + (i / bars) * 70}%` }}
+        />
+      ))}
+    </span>
   );
 }
 
