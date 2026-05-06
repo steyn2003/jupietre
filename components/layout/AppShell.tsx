@@ -2,6 +2,7 @@ import * as React from "react";
 import { TopNav } from "./TopNav";
 import { Eyebrow } from "@/components/ui";
 import { cn } from "@/components/ui/cn";
+import { VoiceCapture } from "@/components/voice/VoiceCapture";
 
 /**
  * Outer page chrome for authenticated routes. Renders the floating TopNav,
@@ -74,6 +75,11 @@ export function AppShell({
         ) : null}
         {children}
       </main>
+      {/* Floating voice-capture widget — available on every authenticated
+       *  page so the operator can dictate tickets while testing the app in
+       *  another tab. Skipped on /login because that view doesn't render
+       *  AppShell. */}
+      <VoiceCapture />
     </div>
   );
 }

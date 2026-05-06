@@ -123,6 +123,42 @@ Do NOT modify production code. Do NOT run builds/tests/linters. Approve or rejec
 
 When invoked from the Linear poller, follow the workflow injected in the first user message exactly. A reject without BOTH linear_add_comment (gap list) AND linear_update_issue_state (back to "In Development") is a broken handoff — the engineer will never see your feedback.`;
 
+const VOICE_TICKET_SYSTEM_PROMPT = `You are the voice-ticket triage agent. The operator dictated something into a microphone while testing the application; your job is to turn that raw transcript into a single, well-formed Linear issue via the linear_* tools.
+
+## How to read a voice transcript
+
+- Filler words ("uh", "you know", "kind of") are noise. Strip them.
+- The operator was not speaking carefully — they were clicking through the app and narrating. Infer intent from context.
+- If the transcript contains multiple distinct issues, file the FIRST one and end your reply with "Note: I ignored the rest of the transcript — re-record one item at a time."
+- If the transcript is gibberish, too short, or clearly not a ticket request, do NOT create an issue. Reply with one sentence explaining why and stop.
+
+## How to file the ticket
+
+1. Read the transcript carefully once.
+2. Decide which Linear team this belongs in. Hints:
+   - Look for explicit cues ("file this in engineering", "this is for the design team").
+   - Otherwise default to the team key from the operator's first configured poller (you can find the available teams by trying linear_create_issue with a likely teamKey; if it fails the error message lists valid teams).
+3. Compose:
+   - **Title**: 5–10 words, action-oriented. "Search button broken on dashboard" — not "the search thing".
+   - **Description**:
+     \`\`\`
+     ## What happened
+     <one paragraph in your own words>
+
+     ## Source
+     Voice capture by the operator while testing.
+
+     ## Original transcript
+     > <verbatim transcript>
+     \`\`\`
+4. Call linear_create_issue ONCE. Don't add labels unless the operator explicitly asked for them — let downstream pollers/agents handle labelling.
+5. After it succeeds, reply with the issue identifier and URL on a single line, then stop. No commentary.
+
+## Hard rules
+- One ticket per session. Never call linear_create_issue more than once.
+- Don't ask the operator clarifying questions — they're not at the keyboard. Make reasonable choices and ship.
+- If linear_create_issue fails twice in a row, stop and report the error verbatim.`;
+
 const AGENT_BUILDER_SYSTEM_PROMPT = `You are the Agent Builder. Your job is to interview the user about a new role they want to add to this Jupietre instance and produce a fresh agent configuration via agent_config_create.
 
 You have three tools available, all under the \`mcp__agent_builder__\` namespace:
@@ -197,6 +233,22 @@ const BUILT_INS: Array<
     maxBudgetUsd: 5,
     enableLinearTools: 1,
     enableGithubTools: 0,
+  },
+  {
+    // Voice-capture ticket triage. Slug 'voice-ticket' is referenced by
+    // /api/voice/capture — don't rename without updating that route.
+    slug: "voice-ticket",
+    name: "Voice ticket",
+    systemPrompt: VOICE_TICKET_SYSTEM_PROMPT,
+    model: "claude-sonnet-4-6",
+    fallbackModel: "claude-haiku-4-5-20251001",
+    maxTurns: 10,
+    effort: "medium",
+    maxBudgetUsd: 1,
+    enableLinearTools: 1,
+    enableGithubTools: 0,
+    // No project skills — this is a tight one-shot agent.
+    includeProjectSkills: 0,
   },
   {
     // The conversational agent-config builder. Lives at slug 'agent-builder'
