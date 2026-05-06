@@ -101,6 +101,11 @@ export const agentConfigs = pgTable(
       .notNull()
       .default([]),
     includeProjectSkills: integer("include_project_skills").notNull().default(1),
+    /** Per-agent skill allowlist. null = use every visible skill (current
+     *  behavior). [] = no DB skills (file-based skills/ folder still flows
+     *  in via the materialization step). [ids...] = only the listed skills
+     *  are materialized. Mirrors the allowedTools null/array pattern. */
+    selectedSkills: jsonb("selected_skills").$type<string[] | null>(),
     maxTurns: integer("max_turns").notNull().default(100),
     effort: text("effort", { enum: ["low", "medium", "high", "max"] })
       .notNull()

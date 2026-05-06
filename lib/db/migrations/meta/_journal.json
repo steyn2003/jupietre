@@ -43,6 +43,13 @@
       "when": 1778068725629,
       "tag": "0005_happy_spyke",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1778070295318,
+      "tag": "0006_calm_bishop",
+      "breakpoints": true
     }
   ]
 }

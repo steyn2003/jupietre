@@ -62,6 +62,16 @@ async function copyDirIfExists(src: string, dst: string): Promise<void> {
  *      folder copy on collision. DB rows are the editable source of truth;
  *      the folder is just the seed + sub-file provider.
  *
+ *  `allowedSkillIds` (the agent's per-agent allowlist):
+ *   - undefined / null  → no filtering, every visible DB skill is materialized
+ *     (current default behaviour).
+ *   - empty array       → no DB skills are materialized; the file-based
+ *     skills/ folder still flows in untouched.
+ *   - non-empty array   → only the listed skill IDs are materialized; the
+ *     folder copy of any non-allowlisted slug is also pruned so the agent
+ *     doesn't load it from the project source. This keeps the per-agent
+ *     selection actually scoped, not just additive over the folder.
+ *
  * Failures are logged but never throw — a session should still start even
  * if one skill is malformed. The agent runs without that skill rather than
  * the operator losing access to the whole feature.
@@ -69,6 +79,7 @@ async function copyDirIfExists(src: string, dst: string): Promise<void> {
 export async function materializeSkillsToWorktree(
   worktreePath: string,
   ownerId: string,
+  allowedSkillIds: string[] | null = null,
 ): Promise<void> {
   const skillsRoot = path.join(worktreePath, ".claude", "skills");
   await fs.mkdir(skillsRoot, { recursive: true });
@@ -79,9 +90,17 @@ export async function materializeSkillsToWorktree(
     console.warn(`[skills] folder copy failed: ${err}`);
   });
 
-  // (2) Overlay DB skills.
+  // (2) Overlay DB skills, scoped to the agent's allowlist when set.
   const teamIds = await getMyTeamIds(ownerId);
-  const dbSkills = await listVisibleSkills(ownerId, teamIds);
+  const allVisible = await listVisibleSkills(ownerId, teamIds);
+  let dbSkills: Skill[];
+  if (allowedSkillIds === null) {
+    dbSkills = allVisible;
+  } else {
+    const allow = new Set(allowedSkillIds);
+    dbSkills = allVisible.filter((s) => allow.has(s.id));
+  }
+
   for (const s of dbSkills) {
     const dir = path.join(skillsRoot, s.slug);
     const file = path.join(dir, "SKILL.md");
@@ -93,9 +112,42 @@ export async function materializeSkillsToWorktree(
     }
   }
 
+  // (3) When the agent has an explicit allowlist, prune folder-based slugs
+  //     that aren't in it AND aren't a DB skill we just wrote. Otherwise
+  //     the per-agent restriction would leak in via the file-based copy.
+  if (allowedSkillIds !== null) {
+    const allowedSlugs = new Set(dbSkills.map((s) => s.slug));
+    let pruned = 0;
+    try {
+      const entries = await fs.readdir(skillsRoot, { withFileTypes: true });
+      for (const e of entries) {
+        if (!e.isDirectory()) continue;
+        if (allowedSlugs.has(e.name)) continue;
+        try {
+          await fs.rm(path.join(skillsRoot, e.name), {
+            recursive: true,
+            force: true,
+          });
+          pruned++;
+        } catch (err) {
+          console.warn(`[skills] failed to prune ${e.name}: ${err}`);
+        }
+      }
+    } catch (err) {
+      console.warn(`[skills] prune scan failed: ${err}`);
+    }
+    if (pruned > 0) {
+      console.log(
+        `[skills] pruned ${pruned} folder-based skill(s) not in agent allowlist`,
+      );
+    }
+  }
+
   if (dbSkills.length > 0) {
+    const scope =
+      allowedSkillIds === null ? "all visible" : `${allowedSkillIds.length} allowed`;
     console.log(
-      `[skills] materialized ${dbSkills.length} DB skill(s) into ${skillsRoot}`,
+      `[skills] materialized ${dbSkills.length} DB skill(s) (${scope}) into ${skillsRoot}`,
     );
   }
 }

@@ -440,7 +440,11 @@ export async function startTurn(params: {
           const { materializeSkillsToWorktree } = await import(
             "./materialize-skills"
           );
-          await materializeSkillsToWorktree(cwd, row.ownerId ?? row.userId);
+          await materializeSkillsToWorktree(
+            cwd,
+            row.ownerId ?? row.userId,
+            config.selectedSkills,
+          );
         } catch (err) {
           console.warn(`[runner] skill materialization failed:`, err);
         }

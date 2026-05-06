@@ -7,6 +7,7 @@ import { getMyTeamIds } from "@/lib/auth/authz";
 import { AppShell } from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/Button";
 import { AgentsList } from "./agents-list";
+import { BuildWithAiButton } from "./build-with-ai-button";
 
 export default async function AgentsPage() {
   const session = await getServerSession();
@@ -22,13 +23,16 @@ export default async function AgentsPage() {
       title="Agents"
       description="Configure the roles available for new sessions and workflows. Each agent owns its own model, tools, and budget. Linear pickup is wired separately under Pollers."
       action={
-        <Link href="/agents/new">
-          <Button
-            trailingIcon={<PlusIcon weight="bold" className="h-3.5 w-3.5" />}
-          >
-            New agent
-          </Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          <BuildWithAiButton />
+          <Link href="/agents/new">
+            <Button
+              trailingIcon={<PlusIcon weight="bold" className="h-3.5 w-3.5" />}
+            >
+              New agent
+            </Button>
+          </Link>
+        </div>
       }
     >
       <AgentsList

@@ -7,6 +7,7 @@ import type { AgentConfig } from "@/lib/db/agent-configs";
 import { graphPath, hasGraph } from "@/lib/graphify/manager";
 import { buildGithubTools } from "./github";
 import { buildLinearTools } from "./linear";
+import { buildAgentBuilderTools } from "./agent-builder";
 import { buildWorkflowTools } from "./workflow";
 
 export function buildMcpServersForSession(params: {
@@ -24,11 +25,27 @@ export function buildMcpServersForSession(params: {
   const { sessionId, repoPath, clonePath, agent, workflowRunId } = params;
   const servers: Record<string, McpServerConfig> = {};
 
-  if (agent.enableLinearTools === 1 && process.env.LINEAR_API_KEY) {
+  // Linear tools resolve their API key at call-time — first from the
+  // session's originating poller, then any enabled poller, then env. So we
+  // register the server whenever the agent toggle is on and let the tool
+  // body throw a descriptive error if no key is configured anywhere.
+  if (agent.enableLinearTools === 1) {
     servers.linear = createSdkMcpServer({
       name: "jupietre-linear",
       version: "1.0.0",
       tools: buildLinearTools(sessionId),
+    });
+  }
+
+  // Agent-builder tools are a privileged surface (they create new agents)
+  // and are only ever exposed to the built-in agent-builder agent. The
+  // create tool also re-checks the running agent's slug at call time as
+  // defence in depth, but this is the primary gate.
+  if (agent.slug === "agent-builder") {
+    servers.agent_builder = createSdkMcpServer({
+      name: "jupietre-agent-builder",
+      version: "1.0.0",
+      tools: buildAgentBuilderTools(sessionId),
     });
   }
 

@@ -30,6 +30,8 @@ export interface AgentFormInitial {
   allowedTools: string[] | null;
   disallowedTools: string[];
   includeProjectSkills: boolean;
+  /** null = use every visible skill; [] = none; [ids] = explicit allowlist. */
+  selectedSkills: string[] | null;
   maxTurns: number;
   effort: "low" | "medium" | "high" | "max";
   maxBudgetUsd: number | null;
@@ -42,12 +44,20 @@ export interface AgentFormInitial {
   approvalTimeoutSeconds: number;
 }
 
+export interface SkillOption {
+  id: string;
+  slug: string;
+  name: string;
+}
+
 export function AgentForm({
   mode,
   initial,
+  availableSkills,
 }: {
   mode: "create" | "edit";
   initial: AgentFormInitial;
+  availableSkills: SkillOption[];
 }) {
   const router = useRouter();
   const [slug, setSlug] = useState(initial.slug);
@@ -75,6 +85,20 @@ export function AgentForm({
   const [monthlyBudgetUsd, setMonthlyBudgetUsd] = useState<string>(
     initial.monthlyBudgetUsd === null ? "" : String(initial.monthlyBudgetUsd),
   );
+  // Skill scope tri-state. "all" = null in DB, "none" = [] in DB,
+  // "selected" = chip array in DB.
+  const initialSkillMode: "all" | "none" | "selected" =
+    initial.selectedSkills === null
+      ? "all"
+      : initial.selectedSkills.length === 0
+        ? "none"
+        : "selected";
+  const [skillMode, setSkillMode] = useState<"all" | "none" | "selected">(
+    initialSkillMode,
+  );
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>(
+    initial.selectedSkills ?? [],
+  );
   const [enableLinearTools, setEnableLinearTools] = useState(
     initial.enableLinearTools,
   );
@@ -101,6 +125,12 @@ export function AgentForm({
     );
   }
 
+  function toggleSkill(id: string) {
+    setSelectedSkillIds((s) =>
+      s.includes(id) ? s.filter((x) => x !== id) : [...s, id],
+    );
+  }
+
   function toggleApprovalTool(tool: string) {
     setApprovalTools((s) =>
       s.includes(tool) ? s.filter((t) => t !== tool) : [...s, tool],
@@ -119,6 +149,12 @@ export function AgentForm({
         fallbackModel: fallbackModel.trim() || null,
         allowedTools: toolMode === "all" ? null : selectedTools,
         includeProjectSkills,
+        selectedSkills:
+          skillMode === "all"
+            ? null
+            : skillMode === "none"
+              ? []
+              : selectedSkillIds,
         maxTurns,
         effort,
         maxBudgetUsd: maxBudgetUsd.trim() === "" ? null : Number(maxBudgetUsd),
@@ -325,6 +361,39 @@ export function AgentForm({
         ) : null}
       </Section>
 
+      <Section
+        title="Skills"
+        description="Materialized into the per-session worktree's .claude/skills/ before the agent runs. The agent loads them lazily based on each skill's description."
+      >
+        <RadioRow
+          name="skillMode"
+          options={[
+            { value: "all", label: "All visible" },
+            { value: "selected", label: "Only selected" },
+            { value: "none", label: "None" },
+          ]}
+          value={skillMode}
+          onChange={(v) => setSkillMode(v as "all" | "selected" | "none")}
+        />
+        {skillMode === "selected" ? (
+          availableSkills.length === 0 ? (
+            <p className="text-[12px] text-fg-muted italic">
+              No skills available. Create some under{" "}
+              <a href="/skills" className="underline hover:text-fg">
+                Skills
+              </a>{" "}
+              first.
+            </p>
+          ) : (
+            <SkillGrid
+              skills={availableSkills}
+              selected={selectedSkillIds}
+              onToggle={toggleSkill}
+            />
+          )
+        ) : null}
+      </Section>
+
       <Section title="Integrations">
         <div className="space-y-3">
           <CheckboxRow
@@ -506,6 +575,45 @@ function RadioRow({
             />
             {o.label}
           </label>
+        );
+      })}
+    </div>
+  );
+}
+
+function SkillGrid({
+  skills,
+  selected,
+  onToggle,
+}: {
+  skills: SkillOption[];
+  selected: string[];
+  onToggle: (id: string) => void;
+}) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+      {skills.map((skill) => {
+        const active = selected.includes(skill.id);
+        return (
+          <button
+            key={skill.id}
+            type="button"
+            onClick={() => onToggle(skill.id)}
+            className={cn(
+              "inline-flex flex-col items-start gap-0.5 px-3 py-2 rounded-xl",
+              "text-left ring-1 transition-colors duration-150",
+              active
+                ? "bg-accent-soft text-accent ring-[color:var(--accent-soft)]"
+                : "bg-surface-2 text-fg-muted ring-hairline hover:text-fg",
+            )}
+          >
+            <span className="text-[13px] font-medium truncate w-full">
+              {skill.name}
+            </span>
+            <span className="text-[11px] font-mono text-fg-subtle truncate w-full">
+              {skill.slug}
+            </span>
+          </button>
         );
       })}
     </div>

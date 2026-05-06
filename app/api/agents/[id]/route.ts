@@ -21,6 +21,7 @@ const patchSchema = z.object({
   allowedTools: z.array(z.string()).nullable().optional(),
   disallowedTools: z.array(z.string()).optional(),
   includeProjectSkills: z.boolean().optional(),
+  selectedSkills: z.array(z.string()).nullable().optional(),
   maxTurns: z.number().int().min(1).max(1000).optional(),
   effort: z.enum(["low", "medium", "high", "max"]).optional(),
   maxBudgetUsd: z.number().int().positive().nullable().optional(),
@@ -94,6 +95,7 @@ export async function PATCH(
   if (d.disallowedTools !== undefined) patch.disallowedTools = d.disallowedTools;
   if (d.includeProjectSkills !== undefined)
     patch.includeProjectSkills = d.includeProjectSkills ? 1 : 0;
+  if (d.selectedSkills !== undefined) patch.selectedSkills = d.selectedSkills;
   if (d.maxTurns !== undefined) patch.maxTurns = d.maxTurns;
   if (d.effort !== undefined) patch.effort = d.effort;
   if (d.maxBudgetUsd !== undefined) patch.maxBudgetUsd = d.maxBudgetUsd;
