@@ -26,6 +26,17 @@ function pickMimeType(): string {
   return "";
 }
 
+export interface AudioRecorderOptions {
+  /** When set, the hook auto-stops + restarts every N seconds, emitting
+   *  each clean WebM blob via `onChunk`. Used for live transcription:
+   *  each chunk is its own self-contained file Whisper accepts cleanly.
+   *  Without this option, the hook records once and only emits on stop(). */
+  chunkSeconds?: number;
+  /** Called every chunk boundary in chunked mode AND on the trailing blob
+   *  when stop() is called. Includes blobs of any size — caller filters. */
+  onChunk?: (blob: Blob) => void;
+}
+
 export interface AudioRecorderControls {
   supported: boolean;
   recording: boolean;
@@ -33,10 +44,12 @@ export interface AudioRecorderControls {
   /** Live mic input level, 0..1. Updated ~30x/s while recording. Useful as
    *  a UI signal so the operator can see their voice is being picked up. */
   level: number;
-  /** Begin a new recording. Resolves once the mic is open. */
+  /** Begin a new recording. Resolves once the mic is open. In chunked mode
+   *  this also kicks off the periodic stop/restart loop. */
   start(): Promise<void>;
-  /** Finish the current recording. Resolves with the captured blob. Returns
-   *  null if there was nothing to capture (no chunks produced). */
+  /** Finish the current recording. In single-shot mode resolves with the
+   *  full captured blob. In chunked mode resolves with the trailing blob
+   *  since the last chunk boundary (also emitted via onChunk for symmetry). */
   stop(): Promise<Blob | null>;
 }
 
@@ -48,7 +61,13 @@ export interface AudioRecorderControls {
  * The mic stream is opened on first start() and reused thereafter — keeps
  * the browser's mic indicator stable instead of toggling per-recording.
  */
-export function useAudioRecorder(): AudioRecorderControls {
+export function useAudioRecorder(
+  opts?: AudioRecorderOptions,
+): AudioRecorderControls {
+  const chunkSeconds = opts?.chunkSeconds;
+  const onChunkRef = useRef(opts?.onChunk);
+  onChunkRef.current = opts?.onChunk;
+
   const [supported, setSupported] = useState(false);
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +82,15 @@ export function useAudioRecorder(): AudioRecorderControls {
   const analyzerRef = useRef<AnalyserNode | null>(null);
   const levelRafRef = useRef<number | null>(null);
 
+  // Chunked-mode state. wantRecordingRef tracks the *user's* intent so the
+  // internal stop+restart loop knows whether to keep going. chunkTimerRef
+  // is the setTimeout handle for the next periodic boundary.
+  const wantRecordingRef = useRef(false);
+  const chunkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Marks whether the next onstop is an internal chunk-boundary (so we
+  // restart automatically) or an external user stop (so we stay stopped).
+  const stopReasonRef = useRef<"chunk" | "user">("user");
+
   useEffect(() => {
     setSupported(
       typeof window !== "undefined" &&
@@ -71,6 +99,11 @@ export function useAudioRecorder(): AudioRecorderControls {
     );
     return () => {
       // Tear down on unmount — the user navigated away.
+      wantRecordingRef.current = false;
+      if (chunkTimerRef.current) {
+        clearTimeout(chunkTimerRef.current);
+        chunkTimerRef.current = null;
+      }
       const stream = streamRef.current;
       if (stream) {
         for (const track of stream.getTracks()) track.stop();
@@ -113,7 +146,6 @@ export function useAudioRecorder(): AudioRecorderControls {
         const a = analyzerRef.current;
         if (!a) return;
         a.getByteTimeDomainData(buffer);
-        // RMS over the byte-domain (centered at 128). Map 0..~80 → 0..1.
         let sum = 0;
         for (let i = 0; i < buffer.length; i++) {
           const v = (buffer[i] - 128) / 128;
@@ -129,6 +161,83 @@ export function useAudioRecorder(): AudioRecorderControls {
     }
   }, []);
 
+  // Spin up a fresh MediaRecorder. Used by both start() and the chunk loop.
+  const spinRecorder = useCallback(() => {
+    if (!streamRef.current) return;
+    const mimeType = mimeRef.current || pickMimeType();
+    mimeRef.current = mimeType;
+
+    const recorder = new MediaRecorder(
+      streamRef.current,
+      mimeType ? { mimeType } : undefined,
+    );
+    chunksRef.current = [];
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) {
+        chunksRef.current.push(e.data);
+      }
+    };
+    recorder.onstop = () => {
+      const blob =
+        chunksRef.current.length > 0
+          ? new Blob(chunksRef.current, {
+              type: mimeRef.current || "audio/webm",
+            })
+          : null;
+      chunksRef.current = [];
+      const reason = stopReasonRef.current;
+
+      if (reason === "chunk") {
+        // Internal stop at a chunk boundary. Emit the blob and immediately
+        // start a new recorder so we keep covering the audio. Errors during
+        // restart leave the recorder stopped — caller will see recording=false
+        // and can re-invoke start().
+        if (blob) onChunkRef.current?.(blob);
+        if (wantRecordingRef.current && streamRef.current) {
+          try {
+            spinRecorder();
+            return;
+          } catch {
+            // Fall through to "stopped" state.
+          }
+        }
+      } else {
+        // External user stop — emit the trailing blob via onChunk for
+        // symmetry, AND resolve the stop() promise with the same blob.
+        if (blob) onChunkRef.current?.(blob);
+        const resolve = stopResolverRef.current;
+        stopResolverRef.current = null;
+        if (resolve) resolve(blob);
+      }
+      setRecording(false);
+    };
+    recorder.onerror = (e) => {
+      const errEvent = e as unknown as { error?: { message?: string } };
+      setError(errEvent.error?.message ?? "Recorder error");
+    };
+
+    recorderRef.current = recorder;
+    recorder.start();
+    setRecording(true);
+
+    // Schedule the next chunk boundary if we're in chunked mode.
+    if (chunkSeconds && wantRecordingRef.current) {
+      if (chunkTimerRef.current) clearTimeout(chunkTimerRef.current);
+      chunkTimerRef.current = setTimeout(() => {
+        if (!wantRecordingRef.current) return;
+        const r = recorderRef.current;
+        if (!r || r.state !== "recording") return;
+        stopReasonRef.current = "chunk";
+        try {
+          r.stop();
+        } catch {
+          // ignore — onstop will not fire, but we'll re-spin via the next
+          // user start() if needed.
+        }
+      }, chunkSeconds * 1000);
+    }
+  }, [chunkSeconds]);
+
   const start = useCallback(async () => {
     setError(null);
     if (!supported) {
@@ -142,12 +251,6 @@ export function useAudioRecorder(): AudioRecorderControls {
 
     try {
       if (!streamRef.current) {
-        // Disable Chrome's video-call-tuned audio processing — echo
-        // cancellation and noise suppression were trained against distant
-        // speakers and will gate too aggressively for dictation, swallowing
-        // whole words and producing the silent-audio Whisper hallucination
-        // ("Thanks for watching. Bye.") Auto-gain stays on so soft voices
-        // are still amplified.
         streamRef.current = await navigator.mediaDevices.getUserMedia({
           audio: {
             echoCancellation: false,
@@ -158,63 +261,33 @@ export function useAudioRecorder(): AudioRecorderControls {
         });
         startLevelMeter(streamRef.current);
       }
-      const mimeType = mimeRef.current || pickMimeType();
-      mimeRef.current = mimeType;
-
-      const recorder = new MediaRecorder(
-        streamRef.current,
-        mimeType ? { mimeType } : undefined,
-      );
-      chunksRef.current = [];
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          chunksRef.current.push(e.data);
-        }
-      };
-      recorder.onstop = () => {
-        const blob =
-          chunksRef.current.length > 0
-            ? new Blob(chunksRef.current, {
-                type: mimeRef.current || "audio/webm",
-              })
-            : null;
-        chunksRef.current = [];
-        const resolve = stopResolverRef.current;
-        stopResolverRef.current = null;
-        if (resolve) resolve(blob);
-        setRecording(false);
-      };
-      recorder.onerror = (e) => {
-        const errEvent = e as unknown as { error?: { message?: string } };
-        setError(errEvent.error?.message ?? "Recorder error");
-      };
-
-      recorderRef.current = recorder;
-      // No timeslice — fire dataavailable once on stop so the resulting WebM
-      // has a single, well-formed container with valid header metadata.
-      // Whisper sometimes returns empty transcripts on streamed multi-chunk
-      // recordings where duration is set to -1.
-      recorder.start();
-      setRecording(true);
+      wantRecordingRef.current = true;
+      stopReasonRef.current = "user"; // default; flipped to "chunk" by the timer
+      spinRecorder();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Mic unavailable";
       setError(message);
       setRecording(false);
     }
-  }, [supported]);
+  }, [supported, spinRecorder, startLevelMeter]);
 
   const stop = useCallback((): Promise<Blob | null> => {
     return new Promise((resolve) => {
+      wantRecordingRef.current = false;
+      if (chunkTimerRef.current) {
+        clearTimeout(chunkTimerRef.current);
+        chunkTimerRef.current = null;
+      }
       const recorder = recorderRef.current;
       if (!recorder || recorder.state !== "recording") {
         resolve(null);
         return;
       }
       stopResolverRef.current = resolve;
+      stopReasonRef.current = "user";
       try {
         recorder.stop();
       } catch (err) {
-        // Already stopped — resolve directly.
         stopResolverRef.current = null;
         setRecording(false);
         if (err instanceof Error) setError(err.message);

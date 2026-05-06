@@ -13,9 +13,11 @@ import { Button } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
 import { useSpeechRecognition } from "./useSpeechRecognition";
 import { useAudioRecorder } from "./useAudioRecorder";
+import { playReadyPing } from "./ping";
 
 const STORAGE_KEY = "jupietre-voice-prefs-v2";
 const HISTORY_KEY = "jupietre-voice-history-v1";
+const MIN_AUDIO_BYTES = 2_000;
 
 type LangPref = "auto" | "en" | "nl" | "de" | "fr" | "es";
 
@@ -39,7 +41,6 @@ interface HistoryItem {
   capturedAt: number;
 }
 
-/** Map our pref code to the BCP-47 tag Web Speech wants. */
 function speechLangFor(pref: LangPref): string {
   switch (pref) {
     case "en":
@@ -54,7 +55,7 @@ function speechLangFor(pref: LangPref): string {
       return "es-ES";
     case "auto":
     default:
-      return "en-US"; // Web Speech doesn't auto-detect; fall back to English.
+      return "en-US";
   }
 }
 
@@ -80,7 +81,7 @@ function savePrefs(prefs: Prefs) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
   } catch {
-    // localStorage full / disabled — fine.
+    // ignore
   }
 }
 
@@ -104,13 +105,6 @@ function saveHistory(items: HistoryItem[]) {
   }
 }
 
-/** Strip the wake phrase out of a chunk and return the remainder. */
-function stripWakePhrase(text: string, wake: string): string {
-  const idx = text.toLowerCase().indexOf(wake.toLowerCase());
-  if (idx < 0) return text.trim();
-  return text.slice(idx + wake.length).replace(/^[\s,.:;!?-]+/, "").trim();
-}
-
 export function VoiceCapture() {
   const [open, setOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -118,30 +112,26 @@ export function VoiceCapture() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  // Loud + visible state during the Whisper round-trip so the operator
-  // doesn't think the click did nothing.
   const [transcribing, setTranscribing] = useState(false);
 
-  // The live preview transcript from Web Speech. Used for UI feedback only;
-  // Whisper's response is what actually gets submitted.
-  const [pending, setPending] = useState("");
-  const pendingRef = useRef("");
-  pendingRef.current = pending;
+  // Web Speech preview text since the most recent recording started.
+  // Whisper's transcript replaces this in the panel after submit.
+  const [previewText, setPreviewText] = useState("");
+  // The most recent successful Whisper transcript — shown to the user as
+  // confirmation of what got filed.
+  const [lastTranscript, setLastTranscript] = useState("");
 
   const wakeArmedRef = useRef(false);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Guard against double-submission when the user clicks stop AND the
-  // silence timer fires in always-on mode, both racing toward submit.
   const inFlightRef = useRef(false);
+  const langRef = useRef<LangPref>(DEFAULT_PREFS.language);
+  langRef.current = prefs.language;
 
-  // Load prefs + history on mount.
   useEffect(() => {
     setPrefs(loadPrefs());
     setHistory(loadHistory());
   }, []);
 
-  // Persist prefs whenever they change (skip the very first render where
-  // we just hydrated from storage).
   const hydratedRef = useRef(false);
   useEffect(() => {
     if (!hydratedRef.current) {
@@ -153,73 +143,64 @@ export function VoiceCapture() {
 
   const recorder = useAudioRecorder();
 
-  const submit = useCallback(
-    async (audio: Blob | null, livePreview: string) => {
-      // We always have a Web Speech preview as fallback. Whisper is the
-      // primary; we only fall back if the audio blob is missing or the
-      // call fails.
+  // Send the captured audio to Whisper, then to the ticket-creation route.
+  // Single round-trip per recording — Whisper sees the full utterance, which
+  // gives much better results than chunked transcription on short clips.
+  const submitBlob = useCallback(
+    async (audio: Blob | null) => {
       if (inFlightRef.current) return;
+      if (!audio || audio.size < MIN_AUDIO_BYTES) {
+        setSubmitError(
+          audio
+            ? `Audio capture was very short (${audio.size} bytes). Hold the mic open longer.`
+            : "Nothing recorded.",
+        );
+        return;
+      }
       inFlightRef.current = true;
       setSubmitting(true);
       setSubmitError(null);
+      setTranscribing(true);
+
+      let transcript = "";
       try {
-        let transcript = livePreview.trim();
-
-        if (audio && audio.size > 2_000) {
-          setTranscribing(true);
-          try {
-            const form = new FormData();
-            // Wrap as a File with an explicit filename + mime so the
-            // multipart Content-Type propagates to the server. Without
-            // this, Bun's parser sometimes drops the blob type and the
-            // server logs end up showing `type=(unknown)`.
-            const ext = (audio.type.includes("mp4") ? "m4a" : "webm");
-            const audioFile = new File([audio], `voice.${ext}`, {
-              type: audio.type || "audio/webm",
-            });
-            form.append("audio", audioFile);
-            if (prefs.language !== "auto") {
-              form.append("language", prefs.language);
-            }
-            const res = await fetch("/api/voice/transcribe", {
-              method: "POST",
-              body: form,
-            });
-            if (res.ok) {
-              const data = (await res.json()) as { text?: string };
-              if (data.text && data.text.trim()) {
-                transcript = data.text.trim();
-              }
-            } else {
-              const data = (await res.json().catch(() => null)) as {
-                error?: string;
-              } | null;
-              // Whisper failed — keep the live preview but surface the
-              // error so the operator knows quality may be worse.
-              setSubmitError(
-                `Whisper failed: ${data?.error ?? res.status}. Using live-preview transcript instead.`,
-              );
-            }
-          } catch (err) {
-            setSubmitError(
-              `Whisper request failed: ${err instanceof Error ? err.message : "unknown"}. Using live-preview transcript instead.`,
-            );
-          } finally {
-            setTranscribing(false);
-          }
-        } else if (audio) {
-          // Tiny audio blob — Whisper would just return empty. Surface a
-          // useful message so the operator knows to speak longer next time.
-          setSubmitError(
-            `Audio capture was very short (${audio.size} bytes). Hold the mic open longer; falling back to live preview.`,
-          );
+        const form = new FormData();
+        const ext = audio.type.includes("mp4") ? "m4a" : "webm";
+        const audioFile = new File([audio], `voice.${ext}`, {
+          type: audio.type || "audio/webm",
+        });
+        form.append("audio", audioFile);
+        if (langRef.current !== "auto") {
+          form.append("language", langRef.current);
         }
-
-        if (!transcript) {
-          setSubmitError("Nothing transcribed — try again.");
+        const res = await fetch("/api/voice/transcribe", {
+          method: "POST",
+          body: form,
+        });
+        if (!res.ok) {
+          const data = (await res.json().catch(() => null)) as {
+            error?: string;
+          } | null;
+          setSubmitError(`Whisper: ${data?.error ?? res.status}`);
           return;
         }
+        const data = (await res.json()) as { text?: string };
+        transcript = (data.text ?? "").trim();
+      } catch (err) {
+        setSubmitError(
+          `Whisper request failed: ${err instanceof Error ? err.message : "unknown"}`,
+        );
+        return;
+      } finally {
+        setTranscribing(false);
+      }
 
+      if (!transcript) {
+        setSubmitError("Nothing transcribed — try again.");
+        return;
+      }
+
+      try {
         const captureRes = await fetch("/api/voice/capture", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -243,8 +224,8 @@ export function VoiceCapture() {
           saveHistory(next);
           return next;
         });
-        setPending("");
-        pendingRef.current = "";
+        setLastTranscript(transcript);
+        setPreviewText("");
       } catch (err) {
         setSubmitError(err instanceof Error ? err.message : "Unknown error");
       } finally {
@@ -252,67 +233,62 @@ export function VoiceCapture() {
         inFlightRef.current = false;
       }
     },
-    [prefs.language],
+    [],
   );
 
-  // Schedule an auto-submit after silenceMs of no new chunks (always-on mode).
-  const scheduleAutoSubmit = useCallback(() => {
+  // Schedule the auto-submit after silenceMs of no new Web Speech chunks.
+  // Used in always-on mode AFTER the wake word has fired.
+  const scheduleSilenceSubmit = useCallback(() => {
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     silenceTimerRef.current = setTimeout(async () => {
-      const text = pendingRef.current;
-      if (text.trim().length === 0) return;
       wakeArmedRef.current = false;
-      // Capture the audio that's accumulated since wake-word fired.
       const audio = await recorder.stop();
-      void submit(audio, text);
-      // Re-arm the recorder for the next wake-word cycle.
-      void recorder.start();
+      void submitBlob(audio).then(() => {
+        if (prefs.alwaysOn) {
+          // Re-prime the recorder for the NEXT wake-word cycle. We don't
+          // start it yet — that happens when the wake word fires again.
+        }
+      });
     }, prefs.silenceMs);
-  }, [prefs.silenceMs, recorder, submit]);
+  }, [prefs.silenceMs, prefs.alwaysOn, recorder, submitBlob]);
 
-  const handleChunk = useCallback(
+  const handleSpeechChunk = useCallback(
     (chunk: string) => {
       if (prefs.alwaysOn) {
         if (!wakeArmedRef.current) {
           if (chunk.toLowerCase().includes(prefs.wakeWord.toLowerCase())) {
             wakeArmedRef.current = true;
-            // Start a fresh audio recording right at the wake-word boundary
-            // so Whisper only hears the actual task, not the ambient noise
-            // that came before.
-            void recorder.stop().then(() => recorder.start());
-            const tail = stripWakePhrase(chunk, prefs.wakeWord);
-            setPending(tail);
-            pendingRef.current = tail;
-            scheduleAutoSubmit();
+            // Audible "I'm listening" cue. Then start a fresh recording so
+            // the wake-word phrase itself isn't captured into the ticket.
+            playReadyPing();
+            setPreviewText("");
+            setSubmitError(null);
+            void recorder.start();
+            scheduleSilenceSubmit();
           }
           return;
         }
-        setPending((prev) => {
-          const next = (prev + " " + chunk).trim();
-          pendingRef.current = next;
-          return next;
-        });
-        scheduleAutoSubmit();
+        // Wake-armed: extend the live-preview text with each Web Speech
+        // chunk and reset the silence timer so a continuous talker doesn't
+        // get cut off mid-sentence.
+        setPreviewText((prev) => (prev + " " + chunk).trim());
+        scheduleSilenceSubmit();
         return;
       }
-
-      // PTT mode — extend the live preview transcript on every chunk.
-      setPending((prev) => {
-        const next = (prev + " " + chunk).trim();
-        pendingRef.current = next;
-        return next;
-      });
+      // PTT mode — just append to the preview. Silence detection isn't
+      // used; the operator clicks Stop when they're done.
+      setPreviewText((prev) => (prev + " " + chunk).trim());
     },
-    [prefs.alwaysOn, prefs.wakeWord, recorder, scheduleAutoSubmit],
+    [prefs.alwaysOn, prefs.wakeWord, recorder, scheduleSilenceSubmit],
   );
 
   const speech = useSpeechRecognition({
     lang: speechLangFor(prefs.language),
-    onChunk: handleChunk,
+    onChunk: handleSpeechChunk,
   });
 
-  // Always-on mode: keep Web Speech running. Audio recorder stays idle until
-  // the wake-word fires, then captures the actual task.
+  // Always-on mode: run Web Speech continuously. The mic recorder stays
+  // idle until the wake word fires.
   useEffect(() => {
     if (!speech.supported) return;
     if (prefs.alwaysOn) {
@@ -321,7 +297,6 @@ export function VoiceCapture() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefs.alwaysOn, speech.supported]);
 
-  // Cleanup the silence timer on unmount.
   useEffect(() => {
     return () => {
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
@@ -329,21 +304,20 @@ export function VoiceCapture() {
   }, []);
 
   const togglePtt = async () => {
-    if (speech.listening) {
+    if (recorder.recording || speech.listening) {
       speech.stop();
       const audio = await recorder.stop();
-      const text = pendingRef.current;
-      if (text.trim().length > 0 || audio) {
-        void submit(audio, text);
-      }
+      void submitBlob(audio);
     } else {
-      setPending("");
-      pendingRef.current = "";
+      setPreviewText("");
+      setLastTranscript("");
       setSubmitError(null);
       speech.start();
       void recorder.start();
     }
   };
+
+  const liveActive = recorder.recording || speech.listening;
 
   return (
     <>
@@ -355,17 +329,17 @@ export function VoiceCapture() {
           "fixed bottom-5 right-5 z-50 h-12 w-12 rounded-full",
           "flex items-center justify-center",
           "ring-1 transition-all duration-200",
-          speech.listening
+          liveActive
             ? "bg-danger-soft text-danger ring-[color:var(--danger-soft)] shadow-[0_0_24px_-4px_var(--danger-soft)]"
             : "bg-fg text-bg ring-fg hover:opacity-90 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.4)]",
         )}
       >
-        {speech.listening ? (
+        {liveActive ? (
           <WaveformIcon weight="bold" className="h-5 w-5" />
         ) : (
           <MicrophoneIcon weight="bold" className="h-5 w-5" />
         )}
-        {speech.listening ? (
+        {liveActive ? (
           <motion.span
             className="absolute inset-0 rounded-full ring-1 ring-danger"
             animate={{ scale: [1, 1.4], opacity: [0.6, 0] }}
@@ -390,7 +364,7 @@ export function VoiceCapture() {
             <div className="flex items-center justify-between px-4 pt-3 pb-2">
               <div className="flex items-center gap-2">
                 <span className="text-[13px] font-medium text-fg">Voice</span>
-                {speech.listening ? (
+                {liveActive ? (
                   <span className="text-[11px] text-danger flex items-center gap-1">
                     <span className="h-1.5 w-1.5 rounded-full bg-danger animate-pulse" />
                     listening
@@ -436,20 +410,24 @@ export function VoiceCapture() {
             ) : (
               <div className="px-4 pb-4 space-y-3">
                 <div className="rounded-xl ring-1 ring-hairline bg-surface-2/60 p-3 min-h-[80px] text-[13px] text-fg leading-relaxed whitespace-pre-wrap">
-                  {pending || speech.interim ? (
+                  {previewText || speech.interim ? (
                     <>
-                      {pending}
-                      {speech.interim ? (
-                        <span className="text-fg-subtle italic">
-                          {pending ? " " : ""}
-                          {speech.interim}
-                        </span>
-                      ) : null}
+                      <span className="text-fg-muted italic">
+                        {previewText}
+                        {speech.interim ? (
+                          <>
+                            {previewText ? " " : ""}
+                            {speech.interim}
+                          </>
+                        ) : null}
+                      </span>
                     </>
+                  ) : lastTranscript ? (
+                    <span className="text-fg">{lastTranscript}</span>
                   ) : (
                     <span className="text-fg-subtle italic">
                       {prefs.alwaysOn
-                        ? `Listening for "${prefs.wakeWord}"...`
+                        ? `Listening for "${prefs.wakeWord}". Ping plays when armed; pause ${Math.round(prefs.silenceMs / 1000)}s to send.`
                         : "Tap the mic to start. Speak. Tap again to send."}
                     </span>
                   )}
@@ -477,11 +455,11 @@ export function VoiceCapture() {
                     onClick={togglePtt}
                     loading={submitting}
                     disabled={submitting}
-                    variant={speech.listening ? "danger" : "primary"}
+                    variant={liveActive ? "danger" : "primary"}
                     className="w-full"
                   >
-                    {speech.listening
-                      ? pending.trim() || recorder.recording
+                    {liveActive
+                      ? recorder.recording
                         ? "Stop & send to ticket"
                         : "Stop"
                       : "Start listening"}
@@ -489,8 +467,8 @@ export function VoiceCapture() {
                 ) : (
                   <p className="text-[11px] text-fg-subtle leading-relaxed">
                     Always-on mode. Say{" "}
-                    <code className="font-mono text-fg">{prefs.wakeWord}</code>{" "}
-                    followed by your task. Auto-sends after{" "}
+                    <code className="font-mono text-fg">{prefs.wakeWord}</code>
+                    , wait for the ping, then dictate. Auto-sends after{" "}
                     {Math.round(prefs.silenceMs / 1000)}s of silence.
                   </p>
                 )}
@@ -533,11 +511,6 @@ export function VoiceCapture() {
   );
 }
 
-/**
- * Tiny live audio-level indicator. 8 bars; how many are lit is proportional
- * to the current RMS. Lets the operator see whether the mic is actually
- * picking up their voice without opening the system audio panel.
- */
 function LevelMeter({ level }: { level: number }) {
   const bars = 8;
   const lit = Math.round(level * bars);
@@ -581,8 +554,8 @@ function SettingsPanel({
         <div className="flex-1">
           <div className="text-[13px] text-fg">Always-on with wake word</div>
           <p className="text-[11px] text-fg-subtle leading-relaxed mt-0.5">
-            Listen continuously. When the wake phrase is heard, capture
-            everything until silence and auto-send to Whisper.
+            Listen continuously. When the wake phrase is heard, play a ping,
+            record until silence, and auto-send to Whisper.
           </p>
         </div>
       </label>
