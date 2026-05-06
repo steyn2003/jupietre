@@ -51,6 +51,23 @@ export async function POST(req: NextRequest): Promise<Response> {
     );
   }
 
+  // Anything smaller than this can't be valid speech audio — usually means
+  // the mic was muted, the recording was triggered before the user spoke,
+  // or the WebM container is empty. Bail with a clear message instead of
+  // letting Whisper return an empty transcript.
+  const MIN_AUDIO_BYTES = 2_000;
+  if (audio.size < MIN_AUDIO_BYTES) {
+    return Response.json(
+      {
+        error: `Audio too small (${audio.size} bytes) — check your mic isn't muted and try speaking longer.`,
+      },
+      { status: 422 },
+    );
+  }
+  console.log(
+    `[voice] transcribe: ${audio.size} bytes, type=${audio.type || "(unknown)"}`,
+  );
+
   // Whisper requires a filename with a recognized extension. Browsers default
   // to type "audio/webm" (Chrome) or "audio/mp4" (Safari). Map the mime to a
   // sensible extension so OpenAI doesn't reject the upload.

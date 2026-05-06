@@ -122,7 +122,11 @@ export function useAudioRecorder(): AudioRecorderControls {
       };
 
       recorderRef.current = recorder;
-      recorder.start(/* timeslice */ 1000);
+      // No timeslice — fire dataavailable once on stop so the resulting WebM
+      // has a single, well-formed container with valid header metadata.
+      // Whisper sometimes returns empty transcripts on streamed multi-chunk
+      // recordings where duration is set to -1.
+      recorder.start();
       setRecording(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Mic unavailable";

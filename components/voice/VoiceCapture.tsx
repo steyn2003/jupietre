@@ -165,7 +165,7 @@ export function VoiceCapture() {
       try {
         let transcript = livePreview.trim();
 
-        if (audio && audio.size > 0) {
+        if (audio && audio.size > 2_000) {
           setTranscribing(true);
           try {
             const form = new FormData();
@@ -199,6 +199,12 @@ export function VoiceCapture() {
           } finally {
             setTranscribing(false);
           }
+        } else if (audio) {
+          // Tiny audio blob — Whisper would just return empty. Surface a
+          // useful message so the operator knows to speak longer next time.
+          setSubmitError(
+            `Audio capture was very short (${audio.size} bytes). Hold the mic open longer; falling back to live preview.`,
+          );
         }
 
         if (!transcript) {
