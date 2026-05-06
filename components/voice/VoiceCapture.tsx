@@ -12,26 +12,50 @@ import {
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
 import { useSpeechRecognition } from "./useSpeechRecognition";
+import { useAudioRecorder } from "./useAudioRecorder";
 
-const STORAGE_KEY = "jupietre-voice-prefs-v1";
+const STORAGE_KEY = "jupietre-voice-prefs-v2";
 const HISTORY_KEY = "jupietre-voice-history-v1";
+
+type LangPref = "auto" | "en" | "nl" | "de" | "fr" | "es";
 
 interface Prefs {
   alwaysOn: boolean;
   wakeWord: string;
   silenceMs: number;
+  language: LangPref;
 }
 
 const DEFAULT_PREFS: Prefs = {
   alwaysOn: false,
   wakeWord: "jupietre ticket",
   silenceMs: 2000,
+  language: "auto",
 };
 
 interface HistoryItem {
   sessionId: string;
   transcript: string;
   capturedAt: number;
+}
+
+/** Map our pref code to the BCP-47 tag Web Speech wants. */
+function speechLangFor(pref: LangPref): string {
+  switch (pref) {
+    case "en":
+      return "en-US";
+    case "nl":
+      return "nl-NL";
+    case "de":
+      return "de-DE";
+    case "fr":
+      return "fr-FR";
+    case "es":
+      return "es-ES";
+    case "auto":
+    default:
+      return "en-US"; // Web Speech doesn't auto-detect; fall back to English.
+  }
 }
 
 function loadPrefs(): Prefs {
@@ -44,6 +68,7 @@ function loadPrefs(): Prefs {
       alwaysOn: parsed.alwaysOn ?? DEFAULT_PREFS.alwaysOn,
       wakeWord: parsed.wakeWord ?? DEFAULT_PREFS.wakeWord,
       silenceMs: parsed.silenceMs ?? DEFAULT_PREFS.silenceMs,
+      language: parsed.language ?? DEFAULT_PREFS.language,
     };
   } catch {
     return DEFAULT_PREFS;
@@ -79,11 +104,7 @@ function saveHistory(items: HistoryItem[]) {
   }
 }
 
-/**
- * Strip the wake phrase out of a captured chunk and return the remainder.
- * Case-insensitive, tolerant of leading/trailing whitespace and punctuation
- * that the recognizer sometimes inserts.
- */
+/** Strip the wake phrase out of a chunk and return the remainder. */
 function stripWakePhrase(text: string, wake: string): string {
   const idx = text.toLowerCase().indexOf(wake.toLowerCase());
   if (idx < 0) return text.trim();
@@ -97,15 +118,21 @@ export function VoiceCapture() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // Loud + visible state during the Whisper round-trip so the operator
+  // doesn't think the click did nothing.
+  const [transcribing, setTranscribing] = useState(false);
 
-  // Captured pending transcript = what's already past the wake word (or
-  // everything since `start()` in PTT mode), waiting to be sent.
+  // The live preview transcript from Web Speech. Used for UI feedback only;
+  // Whisper's response is what actually gets submitted.
   const [pending, setPending] = useState("");
   const pendingRef = useRef("");
   pendingRef.current = pending;
 
-  const wakeArmedRef = useRef(false); // true once wake word has been heard
+  const wakeArmedRef = useRef(false);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Guard against double-submission when the user clicks stop AND the
+  // silence timer fires in always-on mode, both racing toward submit.
+  const inFlightRef = useRef(false);
 
   // Load prefs + history on mount.
   useEffect(() => {
@@ -124,26 +151,74 @@ export function VoiceCapture() {
     savePrefs(prefs);
   }, [prefs]);
 
+  const recorder = useAudioRecorder();
+
   const submit = useCallback(
-    async (text: string) => {
-      const transcript = text.trim();
-      if (!transcript) return;
+    async (audio: Blob | null, livePreview: string) => {
+      // We always have a Web Speech preview as fallback. Whisper is the
+      // primary; we only fall back if the audio blob is missing or the
+      // call fails.
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
       setSubmitting(true);
       setSubmitError(null);
       try {
-        const res = await fetch("/api/voice/capture", {
+        let transcript = livePreview.trim();
+
+        if (audio && audio.size > 0) {
+          setTranscribing(true);
+          try {
+            const form = new FormData();
+            form.append("audio", audio);
+            if (prefs.language !== "auto") {
+              form.append("language", prefs.language);
+            }
+            const res = await fetch("/api/voice/transcribe", {
+              method: "POST",
+              body: form,
+            });
+            if (res.ok) {
+              const data = (await res.json()) as { text?: string };
+              if (data.text && data.text.trim()) {
+                transcript = data.text.trim();
+              }
+            } else {
+              const data = (await res.json().catch(() => null)) as {
+                error?: string;
+              } | null;
+              // Whisper failed — keep the live preview but surface the
+              // error so the operator knows quality may be worse.
+              setSubmitError(
+                `Whisper failed: ${data?.error ?? res.status}. Using live-preview transcript instead.`,
+              );
+            }
+          } catch (err) {
+            setSubmitError(
+              `Whisper request failed: ${err instanceof Error ? err.message : "unknown"}. Using live-preview transcript instead.`,
+            );
+          } finally {
+            setTranscribing(false);
+          }
+        }
+
+        if (!transcript) {
+          setSubmitError("Nothing transcribed — try again.");
+          return;
+        }
+
+        const captureRes = await fetch("/api/voice/capture", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ transcript }),
         });
-        if (!res.ok) {
-          const data = (await res.json().catch(() => null)) as {
+        if (!captureRes.ok) {
+          const data = (await captureRes.json().catch(() => null)) as {
             error?: string;
           } | null;
-          setSubmitError(data?.error ?? `Failed (${res.status})`);
+          setSubmitError(data?.error ?? `Failed (${captureRes.status})`);
           return;
         }
-        const data = (await res.json()) as { sessionId: string };
+        const data = (await captureRes.json()) as { sessionId: string };
         const item: HistoryItem = {
           sessionId: data.sessionId,
           transcript,
@@ -160,31 +235,37 @@ export function VoiceCapture() {
         setSubmitError(err instanceof Error ? err.message : "Unknown error");
       } finally {
         setSubmitting(false);
+        inFlightRef.current = false;
       }
     },
-    [],
+    [prefs.language],
   );
 
-  // Schedule an auto-submit after `silenceMs` of no new chunks. Reset by
-  // every chunk; cleared when we actually fire.
+  // Schedule an auto-submit after silenceMs of no new chunks (always-on mode).
   const scheduleAutoSubmit = useCallback(() => {
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-    silenceTimerRef.current = setTimeout(() => {
+    silenceTimerRef.current = setTimeout(async () => {
       const text = pendingRef.current;
-      if (text.trim().length > 0) {
-        wakeArmedRef.current = false;
-        void submit(text);
-      }
+      if (text.trim().length === 0) return;
+      wakeArmedRef.current = false;
+      // Capture the audio that's accumulated since wake-word fired.
+      const audio = await recorder.stop();
+      void submit(audio, text);
+      // Re-arm the recorder for the next wake-word cycle.
+      void recorder.start();
     }, prefs.silenceMs);
-  }, [prefs.silenceMs, submit]);
+  }, [prefs.silenceMs, recorder, submit]);
 
   const handleChunk = useCallback(
     (chunk: string) => {
       if (prefs.alwaysOn) {
-        // In wake-word mode, suppress every chunk until the phrase appears.
         if (!wakeArmedRef.current) {
           if (chunk.toLowerCase().includes(prefs.wakeWord.toLowerCase())) {
             wakeArmedRef.current = true;
+            // Start a fresh audio recording right at the wake-word boundary
+            // so Whisper only hears the actual task, not the ambient noise
+            // that came before.
+            void recorder.stop().then(() => recorder.start());
             const tail = stripWakePhrase(chunk, prefs.wakeWord);
             setPending(tail);
             pendingRef.current = tail;
@@ -192,7 +273,6 @@ export function VoiceCapture() {
           }
           return;
         }
-        // Already armed — keep collecting.
         setPending((prev) => {
           const next = (prev + " " + chunk).trim();
           pendingRef.current = next;
@@ -202,31 +282,28 @@ export function VoiceCapture() {
         return;
       }
 
-      // PTT mode — every chunk extends the pending transcript. The user
-      // submits manually via the button; no silence timeout.
+      // PTT mode — extend the live preview transcript on every chunk.
       setPending((prev) => {
         const next = (prev + " " + chunk).trim();
         pendingRef.current = next;
         return next;
       });
     },
-    [prefs.alwaysOn, prefs.wakeWord, scheduleAutoSubmit],
+    [prefs.alwaysOn, prefs.wakeWord, recorder, scheduleAutoSubmit],
   );
 
-  const speech = useSpeechRecognition({ onChunk: handleChunk });
+  const speech = useSpeechRecognition({
+    lang: speechLangFor(prefs.language),
+    onChunk: handleChunk,
+  });
 
-  // When the user toggles always-on, kick the recognizer to match. The hook
-  // already auto-restarts after errors / Chrome's 60s timeout.
+  // Always-on mode: keep Web Speech running. Audio recorder stays idle until
+  // the wake-word fires, then captures the actual task.
   useEffect(() => {
     if (!speech.supported) return;
     if (prefs.alwaysOn) {
       speech.start();
-    } else {
-      // Don't auto-stop here — the user might be in the middle of a PTT
-      // capture. Just let PTT control take over.
     }
-    // Intentionally only depends on alwaysOn; we don't want to restart on
-    // every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefs.alwaysOn, speech.supported]);
 
@@ -237,25 +314,25 @@ export function VoiceCapture() {
     };
   }, []);
 
-  const togglePtt = () => {
+  const togglePtt = async () => {
     if (speech.listening) {
       speech.stop();
-      // If we've got pending text, send it now.
+      const audio = await recorder.stop();
       const text = pendingRef.current;
-      if (text.trim().length > 0) {
-        void submit(text);
+      if (text.trim().length > 0 || audio) {
+        void submit(audio, text);
       }
     } else {
       setPending("");
       pendingRef.current = "";
       setSubmitError(null);
       speech.start();
+      void recorder.start();
     }
   };
 
   return (
     <>
-      {/* Floating mic button */}
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -283,7 +360,6 @@ export function VoiceCapture() {
         ) : null}
       </button>
 
-      {/* Panel */}
       <AnimatePresence>
         {open ? (
           <motion.div
@@ -304,6 +380,12 @@ export function VoiceCapture() {
                   <span className="text-[11px] text-danger flex items-center gap-1">
                     <span className="h-1.5 w-1.5 rounded-full bg-danger animate-pulse" />
                     listening
+                  </span>
+                ) : null}
+                {transcribing ? (
+                  <span className="text-[11px] text-accent flex items-center gap-1">
+                    <span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse" />
+                    whisper
                   </span>
                 ) : null}
               </div>
@@ -329,8 +411,8 @@ export function VoiceCapture() {
 
             {!speech.supported ? (
               <div className="px-4 py-6 text-[12px] text-fg-muted leading-relaxed">
-                Your browser doesn&apos;t expose the Web Speech API. Try Chrome
-                or Edge — Firefox doesn&apos;t support it.
+                Your browser doesn&apos;t expose the Web Speech API. Try
+                Chrome or Edge — Firefox doesn&apos;t support it.
               </div>
             ) : showSettings ? (
               <SettingsPanel prefs={prefs} setPrefs={setPrefs} />
@@ -357,11 +439,18 @@ export function VoiceCapture() {
                 </div>
 
                 {submitError ? (
-                  <p className="text-[12px] text-danger">{submitError}</p>
+                  <p className="text-[12px] text-danger leading-relaxed">
+                    {submitError}
+                  </p>
                 ) : null}
                 {speech.error ? (
                   <p className="text-[11px] text-fg-subtle">
-                    recognition: {speech.error}
+                    speech: {speech.error}
+                  </p>
+                ) : null}
+                {recorder.error ? (
+                  <p className="text-[11px] text-fg-subtle">
+                    recorder: {recorder.error}
                   </p>
                 ) : null}
 
@@ -375,7 +464,7 @@ export function VoiceCapture() {
                     className="w-full"
                   >
                     {speech.listening
-                      ? pending.trim()
+                      ? pending.trim() || recorder.recording
                         ? "Stop & send to ticket"
                         : "Stop"
                       : "Start listening"}
@@ -449,16 +538,13 @@ function SettingsPanel({
           <div className="text-[13px] text-fg">Always-on with wake word</div>
           <p className="text-[11px] text-fg-subtle leading-relaxed mt-0.5">
             Listen continuously. When the wake phrase is heard, capture
-            everything until silence and auto-send.
+            everything until silence and auto-send to Whisper.
           </p>
         </div>
       </label>
 
       <div>
-        <label
-          htmlFor="wake"
-          className="block text-[12px] text-fg-muted mb-1"
-        >
+        <label htmlFor="wake" className="block text-[12px] text-fg-muted mb-1">
           Wake phrase
         </label>
         <input
@@ -476,8 +562,35 @@ function SettingsPanel({
           placeholder="jupietre ticket"
         />
         <p className="text-[11px] text-fg-subtle mt-1 leading-relaxed">
-          Two-word phrases trigger less often by accident. Avoid common
-          words.
+          Two-word phrases trigger less often by accident.
+        </p>
+      </div>
+
+      <div>
+        <label htmlFor="lang" className="block text-[12px] text-fg-muted mb-1">
+          Language hint
+        </label>
+        <select
+          id="lang"
+          value={prefs.language}
+          onChange={(e) =>
+            setPrefs({ ...prefs, language: e.target.value as LangPref })
+          }
+          className={cn(
+            "w-full h-9 px-2 rounded-xl text-[13px]",
+            "bg-surface-2 ring-1 ring-hairline focus:ring-strong outline-none",
+            "transition-colors",
+          )}
+        >
+          <option value="auto">Auto-detect</option>
+          <option value="en">English</option>
+          <option value="nl">Dutch (Nederlands)</option>
+          <option value="de">German (Deutsch)</option>
+          <option value="fr">French (Français)</option>
+          <option value="es">Spanish (Español)</option>
+        </select>
+        <p className="text-[11px] text-fg-subtle mt-1 leading-relaxed">
+          Pinning the language usually beats auto-detect for short utterances.
         </p>
       </div>
 
