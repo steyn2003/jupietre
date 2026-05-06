@@ -402,8 +402,11 @@ export async function startTurn(params: {
       if (!clonePath && !row.worktreePath) clonePath = row.repoPath;
 
       // Capture baseSha on the very first turn so we can diff at finish time.
+      // Skipped for no-repo sessions (voice-ticket, agent-builder, anything
+      // started against /app/data) — there's nothing to diff and `git
+      // rev-parse HEAD` would just spam the logs with "not a git repository".
       let baseSha = row.baseSha ?? null;
-      if (!baseSha) {
+      if (!baseSha && row.repoId) {
         try {
           const { stdout } = await execFileAsync(
             "git",

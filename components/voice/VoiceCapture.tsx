@@ -169,7 +169,15 @@ export function VoiceCapture() {
           setTranscribing(true);
           try {
             const form = new FormData();
-            form.append("audio", audio);
+            // Wrap as a File with an explicit filename + mime so the
+            // multipart Content-Type propagates to the server. Without
+            // this, Bun's parser sometimes drops the blob type and the
+            // server logs end up showing `type=(unknown)`.
+            const ext = (audio.type.includes("mp4") ? "m4a" : "webm");
+            const audioFile = new File([audio], `voice.${ext}`, {
+              type: audio.type || "audio/webm",
+            });
+            form.append("audio", audioFile);
             if (prefs.language !== "auto") {
               form.append("language", prefs.language);
             }
