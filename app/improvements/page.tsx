@@ -1,20 +1,21 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { LightbulbIcon } from "@phosphor-icons/react/dist/ssr";
 import { db } from "@/lib/db/client";
-import { agentConfigs, sessions, toolApprovalRequests } from "@/lib/db/schema";
+import { agentConfigs, sessionMessages, sessions } from "@/lib/db/schema";
 import { getServerSession } from "@/lib/auth/session";
 import { getMyTeamIds, visibleSessionsWhere } from "@/lib/auth/authz";
 import { AppShell } from "@/components/layout/AppShell";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Markdown } from "@/components/chat/Markdown";
 import { RunScoutButton } from "./run-scout-button";
+import { CreateTicketButton } from "./create-ticket-button";
 
-// The nightly Scout runs (lib/scout/nightly.ts) all use the built-in agent
-// with slug 'scout'. This page is just the Sessions list filtered to those
-// runs, plus a count of pending ticket proposals (approval-gated
-// linear_create_issue calls) waiting on the operator.
+// Scout runs (lib/scout/nightly.ts) all use the built-in agent with slug
+// 'scout'. This page lists those runs and renders each one's final report —
+// Scout's only deliverable. No tickets are filed automatically.
 
 const statusTone: Record<
   string,
@@ -50,24 +51,30 @@ export default async function ImprovementsPage() {
       ),
     )
     .orderBy(desc(sessions.updatedAt))
-    .limit(100);
+    .limit(50);
 
-  // Pending proposals per session = approval-gated tickets awaiting decision.
-  const pendingBySession = new Map<string, number>();
+  // Latest assistant message per run = Scout's report. One query for all
+  // visible runs; keep the highest-index assistant text per session.
+  const reportBySession = new Map<string, string>();
   if (rows.length > 0) {
-    const pending = await db
+    const msgs = await db
       .select({
-        sessionId: toolApprovalRequests.sessionId,
-        status: toolApprovalRequests.status,
+        sessionId: sessionMessages.sessionId,
+        index: sessionMessages.indexInSession,
+        text: sessionMessages.text,
       })
-      .from(toolApprovalRequests)
-      .where(eq(toolApprovalRequests.status, "pending"));
-    for (const p of pending) {
-      pendingBySession.set(
-        p.sessionId,
-        (pendingBySession.get(p.sessionId) ?? 0) + 1,
-      );
-    }
+      .from(sessionMessages)
+      .where(
+        and(
+          inArray(
+            sessionMessages.sessionId,
+            rows.map((r) => r.id),
+          ),
+          eq(sessionMessages.kind, "assistant"),
+        ),
+      )
+      .orderBy(sessionMessages.indexInSession);
+    for (const m of msgs) reportBySession.set(m.sessionId, m.text); // last wins = highest index
   }
 
   return (
@@ -75,30 +82,33 @@ export default async function ImprovementsPage() {
       email={session.email}
       eyebrow="Workspace"
       title="Improvements"
-      description="Every night Scout studies your repos and proposes small, high-leverage tickets. Open a run to approve or deny each proposal."
+      description="Scout studies your repos and reports small, high-leverage improvements here. Give it a focus to aim the run, or read the latest reports below."
       action={<RunScoutButton />}
     >
       {rows.length === 0 ? (
         <EmptyState
           icon={<LightbulbIcon weight="regular" className="h-5 w-5" />}
           title="No scout runs yet"
-          description="Scout runs nightly over your registered repos. Once it has run, its proposed improvements show up here for you to approve."
+          description="Run Scout with the button above (optionally with a focus like “check for N+1”). Its report shows up here — no tickets are filed automatically."
         />
       ) : (
-        <ul className="rounded-2xl ring-1 ring-hairline bg-surface-1/60 divide-y divide-hairline overflow-hidden">
+        <div className="space-y-4">
           {rows.map((s) => {
-            const pending = pendingBySession.get(s.id) ?? 0;
+            const report = reportBySession.get(s.id);
             return (
-              <li key={s.id}>
-                <Link
-                  href={`/sessions/${s.id}`}
-                  className="group flex items-center gap-4 px-5 py-4 hover:bg-surface-2/60 transition-colors duration-150"
-                >
+              <section
+                key={s.id}
+                className="rounded-2xl ring-1 ring-hairline bg-surface-1/60 overflow-hidden"
+              >
+                <header className="flex items-center gap-3 px-5 py-3 border-b border-hairline">
                   <div className="min-w-0 flex-1">
-                    <span className="truncate text-[14px] font-medium text-fg">
+                    <Link
+                      href={`/sessions/${s.id}`}
+                      className="truncate text-[14px] font-medium text-fg hover:text-accent"
+                    >
                       {s.title}
-                    </span>
-                    <div className="mt-1 flex items-center gap-2 text-[12px] text-fg-muted">
+                    </Link>
+                    <div className="mt-0.5 flex items-center gap-2 text-[12px] text-fg-muted">
                       <span className="truncate font-mono text-fg-subtle">
                         {s.repoLabel ?? s.repoPath}
                       </span>
@@ -106,19 +116,34 @@ export default async function ImprovementsPage() {
                       <span>{s.updatedAt.toLocaleString()}</span>
                     </div>
                   </div>
-                  {pending > 0 ? (
-                    <Badge tone="warning" dot>
-                      {pending} to approve
-                    </Badge>
-                  ) : null}
                   <Badge tone={statusTone[s.status] ?? "neutral"} dot>
                     {s.status}
                   </Badge>
-                </Link>
-              </li>
+                </header>
+                <div className="px-5 py-4">
+                  {report ? (
+                    <>
+                      <Markdown>{report}</Markdown>
+                      <div className="mt-4 flex items-center justify-end gap-3 border-t border-hairline pt-3">
+                        <span className="text-[12px] text-fg-subtle">
+                          Files a Linear ticket labelled{" "}
+                          <span className="font-mono">{s.repoLabel}</span>
+                        </span>
+                        <CreateTicketButton sessionId={s.id} />
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-[13px] text-fg-muted">
+                      {s.status === "running"
+                        ? "Scout is still working — the report will appear here when it finishes."
+                        : "No report yet."}
+                    </p>
+                  )}
+                </div>
+              </section>
             );
           })}
-        </ul>
+        </div>
       )}
     </AppShell>
   );

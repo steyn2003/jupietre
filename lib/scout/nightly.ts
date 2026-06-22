@@ -56,11 +56,16 @@ async function scoutTick(): Promise<void> {
   if (day === lastRunDay) return;
   lastRunDay = day;
   console.log("[scout] kicking off nightly repo scan");
-  await runScout();
+  // Nightly runs use the optional default focus from the environment.
+  await runScout(process.env.SCOUT_FOCUS?.trim() || undefined);
 }
 
-/** Run a scout pass over every registered repo. Exported for a manual kick. */
-export async function runScout(): Promise<void> {
+/**
+ * Run a scout pass over every registered repo. Exported for a manual kick.
+ * `focus` is an optional directive ("check for N+1 queries", "find dead
+ * code") that Scout makes its primary lens for this pass.
+ */
+export async function runScout(focus?: string): Promise<void> {
   const repos = await listAllRepos();
   if (repos.length === 0) {
     console.log("[scout] no repos registered — nothing to scan");
@@ -68,14 +73,14 @@ export async function runScout(): Promise<void> {
   }
   for (const repo of repos) {
     try {
-      await scoutRepo(repo);
+      await scoutRepo(repo, focus);
     } catch (err) {
       console.error(`[scout] failed to scout repo ${repo.slug}:`, err);
     }
   }
 }
 
-async function scoutRepo(repo: Repo): Promise<void> {
+async function scoutRepo(repo: Repo, focus?: string): Promise<void> {
   const agent = await getAgentConfigBySlug(repo.userId, "scout");
   if (!agent) {
     console.warn(
@@ -85,13 +90,16 @@ async function scoutRepo(repo: Repo): Promise<void> {
   }
 
   const sessionId = nanoid();
+  const title = focus
+    ? `Scout — ${repo.slug} · ${focus.slice(0, 60)}`
+    : `Nightly scout — ${repo.slug}`;
   await db.insert(sessions).values({
     id: sessionId,
     userId: repo.userId,
     ownerId: repo.userId,
     teamId: repo.teamId,
     agentConfigId: agent.id,
-    title: `Nightly scout — ${repo.slug}`,
+    title,
     repoLabel: repo.slug,
     repoPath: repo.clonePath,
     repoId: repo.id,
@@ -124,11 +132,13 @@ async function scoutRepo(repo: Repo): Promise<void> {
   }
 
   const kickoff = [
-    `## 🔭 Nightly scout pass — \`${repo.slug}\` (${repo.githubRepo})`,
+    `## 🔭 Scout pass — \`${repo.slug}\` (${repo.githubRepo})`,
     "",
-    `Study this repository and propose your best small improvements per your standing instructions. Default branch is \`${repo.defaultBranch}\`.`,
+    focus
+      ? `**Focus for this run:** ${focus}\n\nMake this your primary lens. Go deep on it; you may still flag anything egregious you trip over.`
+      : `Do a broad sweep for your best small improvements per your standing instructions.`,
     "",
-    "Summarise your proposed improvements first, then batch the `linear_create_issue` calls at the end — each one is approval-gated and the operator will triage them in the morning. A quiet night with zero tickets is a valid result.",
+    `Default branch is \`${repo.defaultBranch}\`. Your deliverable is your final report message — do not file tickets. A quiet result (nothing worth flagging) is valid.`,
   ].join("\n");
 
   console.log(`[scout] started session ${sessionId} for repo ${repo.slug}`);
