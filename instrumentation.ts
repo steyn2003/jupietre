@@ -35,4 +35,7 @@ export async function register() {
     "@/lib/workflows/dispatcher"
   );
   startWorkflowDispatcher();
+
+  const { startScout } = await import("@/lib/scout/nightly");
+  startScout();
 }

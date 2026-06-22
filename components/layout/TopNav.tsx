@@ -14,6 +14,7 @@ import {
   PlayIcon,
   KanbanIcon,
   BookOpenIcon,
+  LightbulbIcon,
 } from "@phosphor-icons/react";
 import { cn } from "@/components/ui/cn";
 
@@ -31,6 +32,12 @@ const NAV: NavItem[] = [
     label: "Sessions",
     icon: <ChatCircleDotsIcon weight="regular" />,
     matchPrefix: "/sessions",
+  },
+  {
+    href: "/improvements",
+    label: "Improvements",
+    icon: <LightbulbIcon weight="regular" />,
+    matchPrefix: "/improvements",
   },
   {
     href: "/agents",
