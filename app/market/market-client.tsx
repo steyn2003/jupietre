@@ -94,7 +94,7 @@ export function MarketClient({
                 </div>
                 <div className="mt-auto flex items-center justify-end gap-2 pt-1">
                   {t.installed ? (
-                    <Link href="/sessions/new">
+                    <Link href={`/sessions/new?agent=${t.leadSlug}`}>
                       <Button variant="secondary" size="sm">
                         Start with {t.leadName}
                       </Button>
@@ -146,9 +146,9 @@ export function MarketClient({
                 </div>
                 <div className="mt-auto flex items-center justify-end pt-1">
                   {a.installed ? (
-                    <Link href="/agents">
+                    <Link href={`/sessions/new?agent=${a.slug}`}>
                       <Button variant="secondary" size="sm">
-                        View in Agents
+                        Start session
                       </Button>
                     </Link>
                   ) : (

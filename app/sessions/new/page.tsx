@@ -8,9 +8,14 @@ import { listTeamsForUser } from "@/lib/db/teams";
 import { AppShell } from "@/components/layout/AppShell";
 import { NewSessionForm } from "./new-session-form";
 
-export default async function NewSessionPage() {
+export default async function NewSessionPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ agent?: string }>;
+}) {
   const session = await getServerSession();
   if (!session) redirect("/login");
+  const { agent: initialAgentSlug } = await searchParams;
 
   const myTeamIds = await getMyTeamIds(session.userId);
   const [agents, teams, repoRows] = await Promise.all([
@@ -41,6 +46,7 @@ export default async function NewSessionPage() {
           teamId: a.teamId,
         }))}
         teams={teams.map((t) => ({ id: t.id, name: t.name }))}
+        initialAgentSlug={initialAgentSlug ?? null}
       />
     </AppShell>
   );

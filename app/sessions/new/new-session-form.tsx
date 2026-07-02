@@ -32,14 +32,20 @@ export function NewSessionForm({
   repos,
   agents,
   teams,
+  initialAgentSlug,
 }: {
   repos: RepoOption[];
   agents: AgentOption[];
   teams: TeamOption[];
+  /** Preselect this agent (e.g. /sessions/new?agent=ship-lead from the market). */
+  initialAgentSlug?: string | null;
 }) {
   const router = useRouter();
   const [agentConfigId, setAgentConfigId] = useState<string>(
-    agents.find((a) => a.slug === "engineer")?.id ?? agents[0]?.id ?? "",
+    agents.find((a) => a.slug === initialAgentSlug)?.id ??
+      agents.find((a) => a.slug === "engineer")?.id ??
+      agents[0]?.id ??
+      "",
   );
   const [title, setTitle] = useState("");
   const [repoId, setRepoId] = useState<string>(repos[0]?.id ?? "");
