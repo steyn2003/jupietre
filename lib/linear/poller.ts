@@ -1,6 +1,5 @@
 import "server-only";
 import { and, desc, eq } from "drizzle-orm";
-import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { sessionMessages, sessions, users } from "@/lib/db/schema";
 import {
@@ -15,7 +14,7 @@ import {
   type PollerWithRules,
 } from "@/lib/db/linear-pollers";
 import { listAllRepos, type Repo } from "@/lib/repos/manager";
-import { provisionWorktree } from "@/lib/worktrees/manager";
+import { spawnAgentSession } from "@/lib/agent/spawn";
 import { startTurn } from "@/lib/agent/runner";
 import { defaultWorkflowForRule } from "./default-workflows";
 import { seedFromEnvIfEmpty } from "./seed-from-env";
@@ -299,49 +298,25 @@ async function pollOnce(entry: PollerWithRules): Promise<void> {
         }
       }
 
-      const sessionId = nanoid();
-      const title = `${issue.identifier}: ${issue.title}`;
-      await db.insert(sessions).values({
-        id: sessionId,
-        userId,
-        ownerId: userId,
-        agentConfigId: cfg.agent.id,
-        title,
-        repoLabel,
-        repoPath,
-        repoId,
-        source: "linear",
-        linearIssueId: issue.identifier,
-        linearPollerId: poller.id,
-        status: "idle",
-      });
-
       // Pickup spawns a worktree because the agent will commit + push.
       // Triage doesn't write code — it reads, labels, transitions. No
-      // worktree saves provisioning time and disk churn.
-      if (!isTriage && repo) {
-        try {
-          const wt = await provisionWorktree({
-            sourceRepoPath: repoPath,
-            sessionId,
-            baseBranch: repo.defaultBranch,
-          });
-          await db
-            .update(sessions)
-            .set({
-              worktreePath: wt.worktreePath,
-              worktreeBranch: wt.worktreeBranch,
-              baseSha: wt.baseSha,
-              baseBranch: repo.defaultBranch,
-            })
-            .where(eq(sessions.id, sessionId));
-        } catch (err) {
-          console.warn(
-            `[linear:${poller.name}] worktree provisioning failed for ${issue.identifier}; running against clone:`,
-            err,
-          );
-        }
-      }
+      // worktree saves provisioning time and disk churn. No kickoff yet —
+      // the first message is assembled below, then startTurn fires.
+      const sessionId = await spawnAgentSession({
+        userId,
+        agentConfigId: cfg.agent.id,
+        title: `${issue.identifier}: ${issue.title}`,
+        source: "linear",
+        repo: repo ?? null,
+        repoPath,
+        worktree: !isTriage,
+        extra: {
+          repoLabel,
+          repoId,
+          linearIssueId: issue.identifier,
+          linearPollerId: poller.id,
+        },
+      });
 
       const workflow =
         cfg.rule.workflowTemplate ??

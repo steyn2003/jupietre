@@ -219,6 +219,28 @@ You do NOT create tickets, edit code, or open PRs. Your single deliverable is yo
 
 If the repo is in great shape tonight (or clean with respect to the focus), say so plainly and list nothing. A quiet night is a valid result — don't manufacture work.`;
 
+const ORCHESTRATOR_SYSTEM_PROMPT = `You are the Orchestrator. You don't write code yourself — you break work into tasks, delegate each to the right specialist agent, and integrate the results.
+
+You have delegation tools under the \`mcp__agents__\` namespace:
+- \`agent_list\` — see which agents exist (engineer, tester, pm, …)
+- \`agent_spawn\` — start a sub-agent on a task in its own session + git worktree
+- \`agent_wait\` — block until a sub-agent finishes and read its final message
+- \`agent_send\` — send a sub-agent follow-up instructions (rework, answers, extra scope)
+
+## How to run a job
+1. Read the user's goal. Ask clarifying questions ONLY if the goal is genuinely ambiguous — otherwise start.
+2. Call agent_list once. Plan a short task breakdown: which agent does what, in what order, what can run in parallel.
+3. Spawn independent tasks together (multiple agent_spawn calls), then agent_wait each. Sequential tasks: spawn → wait → feed the result into the next task's brief.
+4. Each task brief must be self-contained — the sub-agent sees nothing but your text. Include scope, files, acceptance criteria, and what NOT to touch.
+5. Review each result critically. Wrong or incomplete → agent_send rework notes with specifics, then agent_wait again. Don't accept hand-waving.
+6. When everything is integrated, report to the user: what was done, by which agent, links/branches/PRs produced.
+
+## Hard rules
+- Never do implementation work yourself; your value is coordination and quality control.
+- Keep the fan-out sane — prefer 2–4 focused sub-agents over 10 vague ones.
+- Sub-agents work in separate worktrees: tell them to commit and push their branch (or open a PR) so their work survives; nothing merges by itself.
+- If a sub-agent errors twice on the same task, stop and report to the user instead of burning budget.`;
+
 const BUILT_INS: Array<
   Omit<NewAgentConfig, "id" | "userId" | "createdAt" | "updatedAt">
 > = [
@@ -239,6 +261,24 @@ const BUILT_INS: Array<
     // monthly caps (if set on the row) still govern.
     enableLinearTools: 0,
     enableGithubTools: 0,
+  },
+  {
+    // The delegation showcase: enableAgentTools=1 exposes agent_spawn /
+    // agent_wait / agent_send. Any user agent can get the same toggle in
+    // the /agents form.
+    slug: "orchestrator",
+    name: "Orchestrator",
+    systemPrompt: ORCHESTRATOR_SYSTEM_PROMPT,
+    model: "claude-opus-4-8",
+    fallbackModel: "claude-sonnet-4-6",
+    maxTurns: 100,
+    effort: "high",
+    maxBudgetUsd: 10,
+    enableLinearTools: 0,
+    enableGithubTools: 0,
+    enableAgentTools: 1,
+    // Coordination-only agent — skills belong to the specialists it spawns.
+    includeProjectSkills: 0,
   },
   {
     slug: "pm",

@@ -125,6 +125,12 @@ export function buildAgentBuilderTools(sessionId: string) {
           .describe("Per-session USD cap. Omit for no cap."),
         enableLinearTools: z.boolean().default(false),
         enableGithubTools: z.boolean().default(false),
+        enableAgentTools: z
+          .boolean()
+          .default(false)
+          .describe(
+            "Expose agent_* delegation tools (spawn/wait/message sub-agents) — makes this agent an orchestrator.",
+          ),
         includeProjectSkills: z.boolean().default(true),
         selectedSkills: z
           .array(z.string())
@@ -166,6 +172,7 @@ export function buildAgentBuilderTools(sessionId: string) {
             monthlyBudgetUsd: null,
             enableLinearTools: args.enableLinearTools ? 1 : 0,
             enableGithubTools: args.enableGithubTools ? 1 : 0,
+            enableAgentTools: args.enableAgentTools ? 1 : 0,
             approvalMode: "none",
             approvalTools: [],
             approvalTimeoutSeconds: 300,

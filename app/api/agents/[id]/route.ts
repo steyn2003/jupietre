@@ -29,6 +29,7 @@ const patchSchema = z.object({
   monthlyBudgetUsd: z.number().int().positive().nullable().optional(),
   enableLinearTools: z.boolean().optional(),
   enableGithubTools: z.boolean().optional(),
+  enableAgentTools: z.boolean().optional(),
   approvalMode: z.enum(["none", "list", "all"]).optional(),
   approvalTools: z.array(z.string()).optional(),
   approvalTimeoutSeconds: z.number().int().min(5).max(3600).optional(),
@@ -106,6 +107,8 @@ export async function PATCH(
     patch.enableLinearTools = d.enableLinearTools ? 1 : 0;
   if (d.enableGithubTools !== undefined)
     patch.enableGithubTools = d.enableGithubTools ? 1 : 0;
+  if (d.enableAgentTools !== undefined)
+    patch.enableAgentTools = d.enableAgentTools ? 1 : 0;
   if (d.approvalMode !== undefined) patch.approvalMode = d.approvalMode;
   if (d.approvalTools !== undefined) patch.approvalTools = d.approvalTools;
   if (d.approvalTimeoutSeconds !== undefined)

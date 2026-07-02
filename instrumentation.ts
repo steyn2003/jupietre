@@ -36,6 +36,8 @@ export async function register() {
   );
   startWorkflowDispatcher();
 
-  const { startScout } = await import("@/lib/scout/nightly");
-  startScout();
+  // Generic daily agent schedules (absorbs the old scout nightly loop —
+  // it seeds a "Nightly scout" schedule row per repo owner on first boot).
+  const { startScheduler } = await import("@/lib/schedules/runner");
+  startScheduler();
 }

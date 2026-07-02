@@ -39,6 +39,9 @@
     "node_modules",
     "dist",
     ".next",
-    "src/**/*"
+    "src/**/*",
+    "data/**/*",
+    "graphify-out/**/*",
+    "skills/**/*"
   ]
 }

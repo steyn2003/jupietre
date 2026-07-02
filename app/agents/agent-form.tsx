@@ -39,6 +39,7 @@ export interface AgentFormInitial {
   monthlyBudgetUsd: number | null;
   enableLinearTools: boolean;
   enableGithubTools: boolean;
+  enableAgentTools: boolean;
   approvalMode: "none" | "list" | "all";
   approvalTools: string[];
   approvalTimeoutSeconds: number;
@@ -105,6 +106,9 @@ export function AgentForm({
   const [enableGithubTools, setEnableGithubTools] = useState(
     initial.enableGithubTools,
   );
+  const [enableAgentTools, setEnableAgentTools] = useState(
+    initial.enableAgentTools,
+  );
   const [approvalMode, setApprovalMode] = useState<"none" | "list" | "all">(
     initial.approvalMode,
   );
@@ -164,6 +168,7 @@ export function AgentForm({
           monthlyBudgetUsd.trim() === "" ? null : Number(monthlyBudgetUsd),
         enableLinearTools,
         enableGithubTools,
+        enableAgentTools,
         approvalMode,
         approvalTools: approvalMode === "list" ? approvalTools : [],
         approvalTimeoutSeconds,
@@ -435,6 +440,18 @@ export function AgentForm({
                 (worktrees, push, create PR; requires{" "}
                 <code className="font-mono text-[12px]">gh</code> CLI authed
                 on server)
+              </>
+            }
+          />
+          <CheckboxRow
+            checked={enableAgentTools}
+            onChange={setEnableAgentTools}
+            label={
+              <>
+                Agent delegation tools — expose{" "}
+                <code className="font-mono text-[12px]">agent_*</code> tools
+                (spawn / wait / message sub-agent sessions). Makes this agent
+                an orchestrator.
               </>
             }
           />

@@ -383,6 +383,26 @@ export async function startTurn(params: {
         return;
       }
 
+      // Multi-token rotation. Only engages when CLAUDE_TOKENS is set —
+      // single-token setups keep whatever ambient credentials they had.
+      const { tokenPool } = await import("@/lib/token-pool");
+      let pooledToken: ReturnType<typeof tokenPool.acquire> = null;
+      if (process.env.CLAUDE_TOKENS) {
+        tokenPool.init();
+        pooledToken = tokenPool.acquire();
+        if (!pooledToken) {
+          await persistMessage(
+            sessionId,
+            "system",
+            "All Claude tokens exhausted for today — retry after midnight.",
+          );
+          await setStatus(sessionId, "error");
+          state.running = false;
+          return;
+        }
+        tokenPool.applyToEnv(pooledToken);
+      }
+
       // M9: every new session has its own worktree under DATA_DIR. Legacy
       // rows (pre-M9) fall back to repoPath so they keep working unchanged.
       const cwd = row.worktreePath ?? row.repoPath;
@@ -539,6 +559,9 @@ export async function startTurn(params: {
               0,
               m.total_cost_usd - (Number.isFinite(prevCumulative) ? prevCumulative : 0),
             );
+            if (pooledToken && deltaUsd > 0) {
+              tokenPool.recordUsage(pooledToken, deltaUsd);
+            }
             if (deltaUsd > 0) {
               const { recordUsage, usdToMicro } = await import(
                 "@/lib/db/usage"

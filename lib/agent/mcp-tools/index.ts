@@ -9,6 +9,7 @@ import { buildGithubTools } from "./github";
 import { buildLinearTools } from "./linear";
 import { buildAgentBuilderTools } from "./agent-builder";
 import { buildWorkflowTools } from "./workflow";
+import { buildDelegateTools } from "./delegate";
 
 export function buildMcpServersForSession(params: {
   sessionId: string;
@@ -54,6 +55,16 @@ export function buildMcpServersForSession(params: {
       name: "jupietre-github",
       version: "1.0.0",
       tools: buildGithubTools(sessionId, repoPath),
+    });
+  }
+
+  // agent_* delegation tools (spawn/wait/send sub-agent sessions) — the
+  // orchestrator surface. Gated per agent config, same as linear/github.
+  if (agent.enableAgentTools === 1) {
+    servers.agents = createSdkMcpServer({
+      name: "jupietre-agents",
+      version: "1.0.0",
+      tools: buildDelegateTools(sessionId),
     });
   }
 

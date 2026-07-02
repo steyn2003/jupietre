@@ -1,10 +1,9 @@
 import "server-only";
 import { eq } from "drizzle-orm";
-import { nanoid } from "nanoid";
 import { db } from "@/lib/db/client";
 import { repos, sessions } from "@/lib/db/schema";
-import { provisionWorktree } from "@/lib/worktrees/manager";
-import { queueFollowUp, startTurn } from "@/lib/agent/runner";
+import { startTurn } from "@/lib/agent/runner";
+import { sendToSession, spawnAgentSession } from "@/lib/agent/spawn";
 import {
   parseWorkflowDefinition,
   renderHandoff,
@@ -285,14 +284,7 @@ async function resumeSession(
   currentStatus: string,
   text: string,
 ): Promise<void> {
-  if (currentStatus === "running") {
-    // Mid-turn: queue for drain at end-of-turn.
-    await queueFollowUp({ sessionId, userText: text });
-  } else {
-    // Idle or error: start immediately. startTurn bails if it's actually
-    // still running (belt-and-suspenders against a stale status read).
-    void startTurn({ sessionId, userText: text });
-  }
+  await sendToSession({ sessionId, currentStatus, text });
 }
 
 async function createSessionForNode(input: {
@@ -315,49 +307,18 @@ async function createSessionForNode(input: {
     throw new Error(`createSessionForNode: repo ${run.repoId} not found`);
   }
 
-  const sessionId = nanoid();
-  const title = `${nodeSlug} (workflow run ${run.id.slice(0, 6)})`;
-
-  await db.insert(sessions).values({
-    id: sessionId,
+  // No kickoff here — the caller marks the message delivered BEFORE starting
+  // the turn, so a crash mid-dispatch can't leave a pending message AND a
+  // half-running session.
+  const sessionId = await spawnAgentSession({
     userId: run.ownerId,
-    ownerId: run.ownerId,
     teamId: run.teamId,
     agentConfigId: node.agentConfigId,
-    title,
-    repoLabel: repoRow.slug,
-    repoPath: repoRow.clonePath,
-    repoId: repoRow.id,
+    title: `${nodeSlug} (workflow run ${run.id.slice(0, 6)})`,
     source: "workflow",
-    status: "idle",
-    workflowRunId: run.id,
-    workflowNodeSlug: nodeSlug,
+    repo: repoRow,
+    extra: { workflowRunId: run.id, workflowNodeSlug: nodeSlug },
   });
-
-  // Same worktree flow as the Linear poller — per-session branch off the
-  // repo's default. Failure falls back to the bare clone path (matches
-  // the Linear poller's behavior).
-  try {
-    const wt = await provisionWorktree({
-      sourceRepoPath: repoRow.clonePath,
-      sessionId,
-      baseBranch: repoRow.defaultBranch,
-    });
-    await db
-      .update(sessions)
-      .set({
-        worktreePath: wt.worktreePath,
-        worktreeBranch: wt.worktreeBranch,
-        baseSha: wt.baseSha,
-        baseBranch: repoRow.defaultBranch,
-      })
-      .where(eq(sessions.id, sessionId));
-  } catch (err) {
-    console.warn(
-      `[workflows] worktree provisioning failed for session ${sessionId}; running against clone:`,
-      err,
-    );
-  }
 
   console.log(
     `[workflows] created session ${sessionId} for run=${run.id} node=${nodeSlug} agent=${node.agentConfigId}`,

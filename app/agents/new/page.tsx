@@ -44,6 +44,7 @@ export default async function NewAgentPage() {
           monthlyBudgetUsd: null,
           enableLinearTools: false,
           enableGithubTools: false,
+          enableAgentTools: false,
           approvalMode: "none",
           approvalTools: [],
           approvalTimeoutSeconds: 300,

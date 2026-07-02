@@ -122,6 +122,10 @@ export const agentConfigs = pgTable(
     enableLinearTools: integer("enable_linear_tools").notNull().default(0),
     /** When 1, the SDK `mcpServers` bundle includes the git + gh tools. */
     enableGithubTools: integer("enable_github_tools").notNull().default(0),
+    /** When 1, the SDK `mcpServers` bundle includes the agent_* delegation
+     *  tools (spawn / send / wait sub-agent sessions). This is what turns an
+     *  agent into an orchestrator. */
+    enableAgentTools: integer("enable_agent_tools").notNull().default(0),
     /**
      * Approval policy for tool calls.
      *  - "none": legacy bypass — every tool runs without prompting.
@@ -202,9 +206,13 @@ export const sessions = pgTable(
     repoId: text("repo_id").references(() => repos.id, {
       onDelete: "set null",
     }),
-    /** Where the session came from — manual UI, the Linear poller, or the
-     *  workflow dispatcher (M12). */
-    source: text("source", { enum: ["ui", "linear", "workflow"] })
+    /** Where the session came from — manual UI, the Linear poller, the
+     *  workflow dispatcher (M12), a parent agent's agent_spawn tool, or the
+     *  schedule runner. TS-only enum; no DB constraint, so adding values is
+     *  migration-free. */
+    source: text("source", {
+      enum: ["ui", "linear", "workflow", "agent", "schedule"],
+    })
       .notNull()
       .default("ui"),
     /** Linear issue identifier (e.g. "ENG-123") when source=linear */
@@ -594,6 +602,46 @@ export const linearPollerRules = pgTable(
       t.agentConfigId,
     ),
   ],
+);
+
+// ────────────────────────────────────────────────────────────────────
+// Agent schedules
+//
+// One row = one recurring daily agent run ("every night at 3, run Scout over
+// all repos", "every morning at 8, have the PM summarize open tickets").
+// Generalizes the old hardcoded scout nightly loop — Scout is now just a
+// seeded schedule row. The runner in lib/schedules/runner.ts ticks every
+// minute and fires each enabled schedule once per day after its hour.
+// lastRunDay is persisted so restarts don't re-fire (the old scout loop's
+// in-memory flag did).
+// ────────────────────────────────────────────────────────────────────
+
+export const agentSchedules = pgTable(
+  "agent_schedules",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    teamId: text("team_id").references(() => teams.id, { onDelete: "set null" }),
+    name: text("name").notNull(),
+    agentConfigId: text("agent_config_id")
+      .notNull()
+      .references(() => agentConfigs.id, { onDelete: "cascade" }),
+    /** Null = run against every repo the owner has registered (one session
+     *  per repo, scout-style). Set = run against just that repo. */
+    repoId: text("repo_id").references(() => repos.id, { onDelete: "cascade" }),
+    /** Kickoff text sent as the first user message of each run. */
+    prompt: text("prompt").notNull(),
+    /** Server-local hour (0–23) after which the daily run fires. */
+    hour: integer("hour").notNull().default(3),
+    enabled: integer("enabled").notNull().default(1),
+    /** "YYYY-MM-DD" (server-local) of the last fired day. */
+    lastRunDay: text("last_run_day"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [index("agent_schedules_owner_idx").on(t.ownerId)],
 );
 
 export const workflowMessages = pgTable(

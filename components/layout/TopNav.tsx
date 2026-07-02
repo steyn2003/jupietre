@@ -16,6 +16,7 @@ import {
   BookOpenIcon,
   LightbulbIcon,
   CaretDownIcon,
+  ClockIcon,
 } from "@phosphor-icons/react";
 import { cn } from "@/components/ui/cn";
 
@@ -66,6 +67,7 @@ const MORE: NavGroup[] = [
       { href: "/workflows", label: "Workflows", icon: <FlowArrowIcon weight="regular" />, matchPrefix: "/workflows" },
       { href: "/workflow-runs", label: "Runs", icon: <PlayIcon weight="regular" />, matchPrefix: "/workflow-runs" },
       { href: "/pollers", label: "Pollers", icon: <KanbanIcon weight="regular" />, matchPrefix: "/pollers" },
+      { href: "/schedules", label: "Schedules", icon: <ClockIcon weight="regular" />, matchPrefix: "/schedules" },
     ],
   },
   {
