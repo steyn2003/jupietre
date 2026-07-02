@@ -17,6 +17,7 @@ import {
   LightbulbIcon,
   CaretDownIcon,
   ClockIcon,
+  StorefrontIcon,
 } from "@phosphor-icons/react";
 import { cn } from "@/components/ui/cn";
 
@@ -57,6 +58,7 @@ const MORE: NavGroup[] = [
   {
     label: "Build",
     items: [
+      { href: "/market", label: "Market", icon: <StorefrontIcon weight="regular" />, matchPrefix: "/market" },
       { href: "/skills", label: "Skills", icon: <BookOpenIcon weight="regular" />, matchPrefix: "/skills" },
       { href: "/repos", label: "Repos", icon: <GitBranchIcon weight="regular" />, matchPrefix: "/repos" },
     ],
