@@ -9,6 +9,7 @@ const patchSchema = z.object({
   repoId: z.string().nullable().optional(),
   prompt: z.string().min(1).max(10_000).optional(),
   hour: z.number().int().min(0).max(23).optional(),
+  days: z.array(z.number().int().min(0).max(6)).min(1).nullable().optional(),
   enabled: z.boolean().optional(),
 });
 
@@ -35,6 +36,7 @@ export async function PATCH(
     ...(d.repoId !== undefined ? { repoId: d.repoId } : {}),
     ...(d.prompt !== undefined ? { prompt: d.prompt } : {}),
     ...(d.hour !== undefined ? { hour: d.hour } : {}),
+    ...(d.days !== undefined ? { days: d.days } : {}),
     ...(d.enabled !== undefined ? { enabled: d.enabled ? 1 : 0 } : {}),
   });
   if (!row) return Response.json({ error: "Not found" }, { status: 404 });

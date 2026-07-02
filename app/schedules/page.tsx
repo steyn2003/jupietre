@@ -33,6 +33,7 @@ export default async function SchedulesPage() {
           repoId: s.repoId,
           prompt: s.prompt,
           hour: s.hour,
+          days: s.days,
           enabled: s.enabled === 1,
           lastRunDay: s.lastRunDay,
         }))}

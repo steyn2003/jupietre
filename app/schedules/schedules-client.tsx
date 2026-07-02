@@ -16,8 +16,28 @@ interface ScheduleRow {
   repoId: string | null;
   prompt: string;
   hour: number;
+  /** JS getDay() values (0=Sun … 6=Sat). null = every day. */
+  days: number[] | null;
   enabled: boolean;
   lastRunDay: string | null;
+}
+
+// Monday-first display order; values are JS getDay().
+const WEEKDAYS: Array<{ value: number; label: string }> = [
+  { value: 1, label: "Mon" },
+  { value: 2, label: "Tue" },
+  { value: 3, label: "Wed" },
+  { value: 4, label: "Thu" },
+  { value: 5, label: "Fri" },
+  { value: 6, label: "Sat" },
+  { value: 0, label: "Sun" },
+];
+
+function daysLabel(days: number[] | null): string {
+  if (days === null || days.length === 7) return "daily";
+  return WEEKDAYS.filter((d) => days.includes(d.value))
+    .map((d) => d.label)
+    .join(" ");
 }
 
 interface AgentOption {
@@ -50,6 +70,8 @@ export function SchedulesClient({
   const [agentConfigId, setAgentConfigId] = useState(agents[0]?.id ?? "");
   const [repoId, setRepoId] = useState<string>("");
   const [hour, setHour] = useState(3);
+  // Empty selection = every day (stored as null).
+  const [selectedDays, setSelectedDays] = useState<number[]>([]);
   const [prompt, setPrompt] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,6 +110,10 @@ export function SchedulesClient({
           repoId: repoId === "" ? null : repoId,
           prompt,
           hour,
+          days:
+            selectedDays.length === 0 || selectedDays.length === 7
+              ? null
+              : selectedDays,
         }),
       });
       const data = (await res.json().catch(() => null)) as {
@@ -102,6 +128,7 @@ export function SchedulesClient({
       setRows((r) => [...r, { ...created, enabled: created.enabled === 1 }]);
       setName("");
       setPrompt("");
+      setSelectedDays([]);
       setShowForm(false);
       router.refresh();
     } finally {
@@ -185,7 +212,7 @@ export function SchedulesClient({
                 </div>
                 <div className="mt-1 flex items-center gap-2 text-[12px] text-fg-muted">
                   <span className="font-mono tabular-nums">
-                    daily after {String(s.hour).padStart(2, "0")}:00
+                    {daysLabel(s.days)} after {String(s.hour).padStart(2, "0")}:00
                   </span>
                   <span className="text-fg-subtle">·</span>
                   <span className="font-mono">{repoSlug(s.repoId)}</span>
@@ -293,6 +320,38 @@ export function SchedulesClient({
                 />
               </Field>
             </div>
+            <Field
+              label="Days"
+              htmlFor="sched-days"
+              description="None selected = every day."
+            >
+              <div id="sched-days" className="flex flex-wrap gap-2">
+                {WEEKDAYS.map((d) => {
+                  const active = selectedDays.includes(d.value);
+                  return (
+                    <button
+                      key={d.value}
+                      type="button"
+                      onClick={() =>
+                        setSelectedDays((s) =>
+                          s.includes(d.value)
+                            ? s.filter((x) => x !== d.value)
+                            : [...s, d.value],
+                        )
+                      }
+                      className={
+                        "inline-flex items-center justify-center h-9 px-3 rounded-xl text-[12px] font-mono ring-1 transition-colors duration-150 " +
+                        (active
+                          ? "bg-accent-soft text-accent ring-[color:var(--accent-soft)]"
+                          : "bg-surface-2 text-fg-muted ring-hairline hover:text-fg")
+                      }
+                    >
+                      {d.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </Field>
             <Field label="Prompt" htmlFor="sched-prompt" required>
               <Textarea
                 id="sched-prompt"

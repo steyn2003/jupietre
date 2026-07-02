@@ -21,9 +21,10 @@ import { subscribe } from "@/lib/agent/runner";
 // Parent/child linkage rides the existing sessions.parentSessionId column.
 // ────────────────────────────────────────────────────────────────────
 
-// ponytail: fixed depth/fan-out caps; make per-agent config if anyone hits them.
-const MAX_DEPTH = 2; // a sub-agent may spawn sub-sub-agents, no deeper
-const MAX_CHILDREN = 20; // per parent session
+// Caps are env-tunable; per-agent columns can come later if anyone needs
+// different limits per role.
+const MAX_DEPTH = Number(process.env.AGENT_MAX_DEPTH ?? 2); // sub-sub-agents ok, no deeper
+const MAX_CHILDREN = Number(process.env.AGENT_MAX_CHILDREN ?? 20); // per parent session
 
 function textResult(text: string) {
   return { content: [{ type: "text" as const, text }] };

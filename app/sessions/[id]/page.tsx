@@ -12,6 +12,7 @@ import { AppShell } from "@/components/layout/AppShell";
 import { Badge } from "@/components/ui/Badge";
 import { SessionChat } from "./session-chat";
 import { DeleteSessionButton } from "./delete-button";
+import { DelegationGraph } from "./delegation-graph";
 
 export default async function SessionPage({
   params,
@@ -84,7 +85,7 @@ export default async function SessionPage({
         {parentInfo ? (
           <div className="flex items-center gap-1.5 text-[12px] text-fg-muted">
             <GitBranchIcon weight="regular" className="h-3.5 w-3.5" />
-            forked from{" "}
+            {row.source === "agent" ? "delegated from" : "forked from"}{" "}
             <Link
               href={`/sessions/${parentInfo.id}`}
               className="text-fg hover:text-accent transition-colors"
@@ -97,6 +98,8 @@ export default async function SessionPage({
           </div>
         ) : null}
       </div>
+
+      <DelegationGraph sessionId={row.id} />
 
       <SessionChat
         sessionId={row.id}

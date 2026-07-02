@@ -10,6 +10,8 @@ const createSchema = z.object({
   repoId: z.string().nullable().optional(),
   prompt: z.string().min(1).max(10_000),
   hour: z.number().int().min(0).max(23).default(3),
+  /** JS getDay() values (0=Sun … 6=Sat). null/omitted = every day. */
+  days: z.array(z.number().int().min(0).max(6)).min(1).nullable().optional(),
   enabled: z.boolean().default(true),
 });
 
@@ -41,6 +43,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     repoId: d.repoId ?? null,
     prompt: d.prompt,
     hour: d.hour,
+    days: d.days ?? null,
     enabled: d.enabled ? 1 : 0,
   });
   return Response.json({ schedule: row });

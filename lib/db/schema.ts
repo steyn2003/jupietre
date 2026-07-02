@@ -635,6 +635,10 @@ export const agentSchedules = pgTable(
     prompt: text("prompt").notNull(),
     /** Server-local hour (0–23) after which the daily run fires. */
     hour: integer("hour").notNull().default(3),
+    /** Days of week the schedule fires on, as JS getDay() values (0=Sun …
+     *  6=Sat). Null = every day. Enables "weekdays only" / "weekly on
+     *  Monday" without a cron parser. */
+    days: jsonb("days").$type<number[] | null>(),
     enabled: integer("enabled").notNull().default(1),
     /** "YYYY-MM-DD" (server-local) of the last fired day. */
     lastRunDay: text("last_run_day"),

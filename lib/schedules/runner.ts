@@ -53,10 +53,15 @@ function todayKey(): string {
 }
 
 async function schedulerTick(): Promise<void> {
-  const hourNow = new Date().getHours();
+  const now = new Date();
+  const hourNow = now.getHours();
+  const weekday = now.getDay();
   const day = todayKey();
   const due = (await listEnabledSchedules()).filter(
-    (s) => hourNow >= s.hour && s.lastRunDay !== day,
+    (s) =>
+      hourNow >= s.hour &&
+      s.lastRunDay !== day &&
+      (s.days === null || s.days.includes(weekday)),
   );
   for (const schedule of due) {
     // Claim before spawning so a crash mid-run doesn't re-fire the whole day.
