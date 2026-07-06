@@ -13,6 +13,7 @@ const patchSchema = z.object({
   description: z.string().min(1).max(1_000).optional(),
   body: z.string().min(1).max(200_000).optional(),
   teamId: z.string().nullable().optional(),
+  repoId: z.string().nullable().optional(),
 });
 
 export async function GET(
@@ -57,6 +58,7 @@ export async function PATCH(
   if (d.description !== undefined) patch.description = d.description;
   if (d.body !== undefined) patch.body = d.body;
   if (d.teamId !== undefined) patch.teamId = d.teamId;
+  if (d.repoId !== undefined) patch.repoId = d.repoId;
 
   const row = await updateSkill(id, patch);
   if (!row) return Response.json({ error: "Not found" }, { status: 404 });

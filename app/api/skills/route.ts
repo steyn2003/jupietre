@@ -14,6 +14,9 @@ const createSchema = z.object({
   description: z.string().min(1).max(1_000),
   body: z.string().min(1).max(200_000),
   teamId: z.string().nullable().optional(),
+  /** Null / omitted = global skill. Set = only materialized into sessions on
+   *  that repo. */
+  repoId: z.string().nullable().optional(),
 });
 
 export async function GET(): Promise<Response> {
@@ -42,6 +45,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     const row = await createSkill({
       ownerId: session.userId,
       teamId: d.teamId ?? null,
+      repoId: d.repoId ?? null,
       slug: d.slug,
       name: d.name,
       description: d.description,

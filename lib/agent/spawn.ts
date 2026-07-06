@@ -24,7 +24,7 @@ export async function spawnAgentSession(params: {
   teamId?: string | null;
   agentConfigId: string;
   title: string;
-  source: "ui" | "linear" | "workflow" | "agent" | "schedule";
+  source: "ui" | "linear" | "workflow" | "agent" | "schedule" | "event";
   /** Bound repo. When set, a per-session worktree is provisioned unless
    *  `worktree: false` (worktree failure falls back to the bare clone). */
   repo?: SpawnRepo | null;

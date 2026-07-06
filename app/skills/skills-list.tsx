@@ -9,13 +9,15 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 
-interface SkillRow {
+export interface SkillRow {
   id: string;
   slug: string;
   name: string;
   description: string;
   ownerId: string;
   teamId: string | null;
+  repoId: string | null;
+  repoSlug: string | null;
 }
 
 export function SkillsList({
@@ -86,6 +88,15 @@ export function SkillsList({
                   <Badge>
                     <span className="font-mono normal-case">{s.slug}</span>
                   </Badge>
+                  {s.repoId ? (
+                    <Badge tone="accent">
+                      <span className="normal-case">
+                        {s.repoSlug ?? "repo"}
+                      </span>
+                    </Badge>
+                  ) : (
+                    <Badge>global</Badge>
+                  )}
                   {s.teamId ? <Badge>Team</Badge> : null}
                 </div>
                 <p className="mt-1 text-[12px] text-fg-muted line-clamp-2 leading-relaxed">

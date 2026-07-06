@@ -126,6 +126,10 @@ export const agentConfigs = pgTable(
      *  tools (spawn / send / wait sub-agent sessions). This is what turns an
      *  agent into an orchestrator. */
     enableAgentTools: integer("enable_agent_tools").notNull().default(0),
+    /** When 1, the SDK `mcpServers` bundle includes the event_* tools
+     *  (emit / recent) — lets the agent publish onto the event bus. Same
+     *  gating pattern as enableAgentTools. */
+    enableEventTools: integer("enable_event_tools").notNull().default(0),
     /**
      * Approval policy for tool calls.
      *  - "none": legacy bypass — every tool runs without prompting.
@@ -211,12 +215,16 @@ export const sessions = pgTable(
      *  schedule runner. TS-only enum; no DB constraint, so adding values is
      *  migration-free. */
     source: text("source", {
-      enum: ["ui", "linear", "workflow", "agent", "schedule"],
+      enum: ["ui", "linear", "workflow", "agent", "schedule", "event"],
     })
       .notNull()
       .default("ui"),
     /** Linear issue identifier (e.g. "ENG-123") when source=linear */
     linearIssueId: text("linear_issue_id"),
+    /** When source=event, the event (events.id) whose dispatch spawned this
+     *  session. No FK — an audit ref, and the event_emit chain-depth guard
+     *  reads it. */
+    triggerEventId: text("trigger_event_id"),
     /** When source=linear, the poller that picked up this issue. The Linear
      *  MCP tools use this poller's API key when the session calls linear_*
      *  tools, so the agent talks to the workspace the issue actually came
@@ -260,6 +268,10 @@ export const sessions = pgTable(
      *  uniqueness is what the dispatcher uses to decide "new session vs resume
      *  existing session" when routing a message. */
     workflowNodeSlug: text("workflow_node_slug"),
+    /** Set by the skill distiller when it last processed this session's
+     *  transcript. Compared against updatedAt to decide re-distillation —
+     *  null (or older than updatedAt) means the session is due for a pass. */
+    distilledAt: timestamp("distilled_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
@@ -495,6 +507,10 @@ export const skills = pgTable(
     teamId: text("team_id").references(() => teams.id, {
       onDelete: "set null",
     }),
+    /** Optional repo scope. Null = global skill (materialized into every
+     *  session, current behavior). Set = the skill is only materialized into
+     *  sessions bound to that repo. On repo delete the skill goes global. */
+    repoId: text("repo_id").references(() => repos.id, { onDelete: "set null" }),
     /** kebab-case, used as the directory name under .claude/skills/. */
     slug: text("slug").notNull(),
     /** Human label shown in the UI (also written to SKILL.md frontmatter). */
@@ -508,6 +524,44 @@ export const skills = pgTable(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (t) => [uniqueIndex("skills_owner_slug_idx").on(t.ownerId, t.slug)],
+);
+
+// ────────────────────────────────────────────────────────────────────
+// Skill drafts (Agentic OS — Phase 2, auto skill library)
+//
+// After an agent session goes quiet, the cheap-model "distiller" pass
+// (lib/skills/distiller.ts) extracts reusable, repo-specific procedures from
+// the transcript into rows here. A review queue on /skills lets the operator
+// approve a draft into the real `skills` table (carrying its repoId + teamId)
+// or reject it. sourceSessionId keeps no FK on purpose — it is an audit ref
+// that must survive the session being deleted (mirrors workflowMessages.sessionId).
+// ────────────────────────────────────────────────────────────────────
+
+export const skillDrafts = pgTable(
+  "skill_drafts",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Optional team scope — copied from the source session. */
+    teamId: text("team_id").references(() => teams.id, { onDelete: "set null" }),
+    /** Repo the source session was bound to. Carried onto the skill on approve. */
+    repoId: text("repo_id").references(() => repos.id, { onDelete: "set null" }),
+    /** The session this draft was distilled from. No FK — kept as an audit ref
+     *  even after the session is deleted (mirrors workflowMessages.sessionId). */
+    sourceSessionId: text("source_session_id"),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    body: text("body").notNull(),
+    status: text("status", { enum: ["pending", "approved", "rejected"] })
+      .notNull()
+      .default("pending"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    reviewedAt: timestamp("reviewed_at"),
+  },
+  (t) => [index("skill_drafts_owner_status_idx").on(t.ownerId, t.status)],
 );
 
 // ────────────────────────────────────────────────────────────────────
@@ -648,6 +702,71 @@ export const agentSchedules = pgTable(
   (t) => [index("agent_schedules_owner_idx").on(t.ownerId)],
 );
 
+// ────────────────────────────────────────────────────────────────────
+// Connections (Agentic OS — Phase 1)
+//
+// A `connections` row is one credentialed resource the operator registers
+// once and grants to agents: a Linear workspace (api key), a GitHub token,
+// or an external MCP server (stdio command or http endpoint). Grants live
+// in `agent_connection_grants` (many-to-many with agent_configs) and are
+// editable as edges on the Control canvas.
+//
+// Secrets in `configJson` are stored plaintext — matching the existing
+// precedent for linearPollers.apiKey (see that table's comment). No
+// field-level encryption exists in the codebase yet.
+// ────────────────────────────────────────────────────────────────────
+
+/** Discriminated union stored in connections.configJson. */
+export type ConnectionConfig =
+  | { apiKey: string } // kind = "linear"
+  | { token: string } // kind = "github"
+  | { transport: "stdio"; command: string; args: string[] } // kind = "mcp"
+  | { transport: "http"; url: string; headers?: Record<string, string> }; // kind = "mcp"
+
+export const connections = pgTable(
+  "connections",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Optional team scope — team-shared like repos: any team member can see
+     *  and grant it; only the owner / a team owner can edit. */
+    teamId: text("team_id").references(() => teams.id, { onDelete: "set null" }),
+    kind: text("kind", { enum: ["linear", "github", "mcp"] }).notNull(),
+    /** Human display name shown in the UI + on the canvas card. */
+    name: text("name").notNull(),
+    /** kebab-case, unique per owner (same scoping as other tables). */
+    slug: text("slug").notNull(),
+    /** Credentialed config — see the ConnectionConfig union. Plaintext secrets
+     *  (matches linearPollers.apiKey precedent — no encryption in the codebase). */
+    configJson: jsonb("config_json").$type<ConnectionConfig>().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("connections_owner_slug_idx").on(t.ownerId, t.slug)],
+);
+
+export const agentConnectionGrants = pgTable(
+  "agent_connection_grants",
+  {
+    id: text("id").primaryKey(),
+    agentConfigId: text("agent_config_id")
+      .notNull()
+      .references(() => agentConfigs.id, { onDelete: "cascade" }),
+    connectionId: text("connection_id")
+      .notNull()
+      .references(() => connections.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("agent_connection_grants_agent_conn_idx").on(
+      t.agentConfigId,
+      t.connectionId,
+    ),
+  ],
+);
+
 export const workflowMessages = pgTable(
   "workflow_messages",
   {
@@ -693,4 +812,135 @@ export const workflowMessages = pgTable(
     index("workflow_messages_status_idx").on(t.status, t.createdAt),
     index("workflow_messages_session_idx").on(t.sessionId),
   ],
+);
+
+// ────────────────────────────────────────────────────────────────────
+// Event bus (Agentic OS — Phase 3)
+//
+// A general events stream that unifies the previously-siloed triggers. An
+// `events` row is one thing that happened, published under a dot-namespaced
+// `topic` (e.g. "deploy.finished"). Two producers: agents (via the event_*
+// MCP tools, source="agent") and external systems (via a webhook URL keyed
+// off `webhooks.key`, source="webhook").
+//
+// `event_subscriptions` wires a topic pattern to an agent: the dispatcher
+// (lib/events/dispatcher.ts) polls pending events (dispatchedAt = null) and,
+// for each enabled subscription whose owner can see the event's scope and
+// whose pattern matches, spawns a session. `event_deliveries` records each
+// (event, subscription) fan-out exactly once (unique index = idempotency).
+//
+// chainDepth guards against event→session→event→… runaway loops: an agent
+// emitting inside an event-triggered session inherits depth+1, refused past
+// EVENT_MAX_CHAIN_DEPTH. sourceSessionId / sourceAgentConfigId carry no FK —
+// audit refs that survive the source being deleted (workflowMessages precedent).
+// ────────────────────────────────────────────────────────────────────
+
+export const events = pgTable(
+  "events",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    teamId: text("team_id").references(() => teams.id, { onDelete: "set null" }),
+    /** Dot-namespaced topic, e.g. "deploy.finished". Lowercase segments. */
+    topic: text("topic").notNull(),
+    payloadJson: jsonb("payload_json")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    source: text("source", { enum: ["agent", "webhook"] }).notNull(),
+    /** Session that emitted this (source="agent"). No FK — audit ref. */
+    sourceSessionId: text("source_session_id"),
+    /** Agent config that emitted this (source="agent"). No FK — audit ref. */
+    sourceAgentConfigId: text("source_agent_config_id"),
+    /** Loop guard — 0 for webhook events, depth+1 for agent-emitted events
+     *  fired from an event-triggered session. */
+    chainDepth: integer("chain_depth").notNull().default(0),
+    /** Set by the dispatcher once every matching subscription has a delivery
+     *  row. Null = pending (the dispatcher's work queue). */
+    dispatchedAt: timestamp("dispatched_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [
+    index("events_topic_created_idx").on(t.topic, t.createdAt),
+    index("events_owner_created_idx").on(t.ownerId, t.createdAt),
+  ],
+);
+
+export const eventSubscriptions = pgTable(
+  "event_subscriptions",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    teamId: text("team_id").references(() => teams.id, { onDelete: "set null" }),
+    agentConfigId: text("agent_config_id")
+      .notNull()
+      .references(() => agentConfigs.id, { onDelete: "cascade" }),
+    /** Exact topic ("deploy.finished") OR a prefix wildcard ("deploy.*",
+     *  trailing ".*" only — matching stays dead simple). */
+    topicPattern: text("topic_pattern").notNull(),
+    /** Repo the spawned session runs against. Null = owner's first repo
+     *  (mirrors the schedule runner's default-repo resolution). */
+    repoId: text("repo_id").references(() => repos.id, { onDelete: "set null" }),
+    /** Optional prefix prepended to the kickoff message; the topic + pretty
+     *  payload are always appended after it. */
+    promptTemplate: text("prompt_template"),
+    enabled: integer("enabled").notNull().default(1),
+    /** Delivery rate cap — refuses spawns past this many per rolling hour. */
+    maxPerHour: integer("max_per_hour").notNull().default(20),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [
+    index("event_subscriptions_agent_idx").on(t.agentConfigId),
+    index("event_subscriptions_owner_idx").on(t.ownerId),
+  ],
+);
+
+export const eventDeliveries = pgTable(
+  "event_deliveries",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    subscriptionId: text("subscription_id")
+      .notNull()
+      .references(() => eventSubscriptions.id, { onDelete: "cascade" }),
+    /** The spawned session, when status="spawned". Null otherwise. */
+    sessionId: text("session_id"),
+    status: text("status", {
+      enum: ["spawned", "skipped_rate_limit", "skipped_depth", "error"],
+    }).notNull(),
+    error: text("error"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [
+    // The dedupe / idempotency key: one delivery per (event, subscription).
+    // The dispatcher inserts on conflict-do-nothing, so retries are safe.
+    uniqueIndex("event_deliveries_dedupe_idx").on(t.eventId, t.subscriptionId),
+    index("event_deliveries_subscription_idx").on(t.subscriptionId, t.createdAt),
+  ],
+);
+
+export const webhooks = pgTable(
+  "webhooks",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    teamId: text("team_id").references(() => teams.id, { onDelete: "set null" }),
+    name: text("name").notNull(),
+    /** nanoid — the URL path secret (`/api/hooks/<key>`). Unique. */
+    key: text("key").notNull(),
+    /** Topic events posted to this hook are emitted under. */
+    topic: text("topic").notNull(),
+    enabled: integer("enabled").notNull().default(1),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("webhooks_key_idx").on(t.key)],
 );

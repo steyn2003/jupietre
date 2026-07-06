@@ -18,6 +18,9 @@ import {
   CaretDownIcon,
   ClockIcon,
   StorefrontIcon,
+  GraphIcon,
+  PlugsConnectedIcon,
+  BroadcastIcon,
 } from "@phosphor-icons/react";
 import { cn } from "@/components/ui/cn";
 
@@ -36,15 +39,14 @@ type NavGroup = { label: string; items: NavItem[] };
 const PRIMARY: NavItem[] = [
   {
     href: "/",
+    label: "Control",
+    icon: <GraphIcon weight="regular" />,
+  },
+  {
+    href: "/sessions",
     label: "Sessions",
     icon: <ChatCircleDotsIcon weight="regular" />,
     matchPrefix: "/sessions",
-  },
-  {
-    href: "/improvements",
-    label: "Improvements",
-    icon: <LightbulbIcon weight="regular" />,
-    matchPrefix: "/improvements",
   },
   {
     href: "/agents",
@@ -59,8 +61,10 @@ const MORE: NavGroup[] = [
     label: "Build",
     items: [
       { href: "/market", label: "Market", icon: <StorefrontIcon weight="regular" />, matchPrefix: "/market" },
+      { href: "/improvements", label: "Improvements", icon: <LightbulbIcon weight="regular" />, matchPrefix: "/improvements" },
       { href: "/skills", label: "Skills", icon: <BookOpenIcon weight="regular" />, matchPrefix: "/skills" },
       { href: "/repos", label: "Repos", icon: <GitBranchIcon weight="regular" />, matchPrefix: "/repos" },
+      { href: "/connections", label: "Connections", icon: <PlugsConnectedIcon weight="regular" />, matchPrefix: "/connections" },
     ],
   },
   {
@@ -70,6 +74,7 @@ const MORE: NavGroup[] = [
       { href: "/workflow-runs", label: "Runs", icon: <PlayIcon weight="regular" />, matchPrefix: "/workflow-runs" },
       { href: "/pollers", label: "Pollers", icon: <KanbanIcon weight="regular" />, matchPrefix: "/pollers" },
       { href: "/schedules", label: "Schedules", icon: <ClockIcon weight="regular" />, matchPrefix: "/schedules" },
+      { href: "/events", label: "Events", icon: <BroadcastIcon weight="regular" />, matchPrefix: "/events" },
     ],
   },
   {
@@ -85,7 +90,7 @@ export function TopNav({ email }: { email?: string }) {
   const pathname = usePathname() ?? "/";
 
   function isActive(item: NavItem) {
-    if (item.href === "/") return pathname === "/" || pathname.startsWith("/sessions");
+    if (item.href === "/") return pathname === "/";
     return pathname === item.href || (item.matchPrefix && pathname.startsWith(item.matchPrefix));
   }
 
@@ -103,7 +108,7 @@ export function TopNav({ email }: { email?: string }) {
         {/* brand mark */}
         <Link
           href="/"
-          aria-label="Jupietre — Sessions"
+          aria-label="Jupietre — Control"
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-fg text-bg font-mono text-[13px] font-semibold"
         >
           J

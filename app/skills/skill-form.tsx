@@ -12,20 +12,29 @@ export interface SkillFormInitial {
   name: string;
   description: string;
   body: string;
+  repoId: string | null;
+}
+
+export interface RepoOption {
+  id: string;
+  slug: string;
 }
 
 export function SkillForm({
   mode,
   initial,
+  repos,
 }: {
   mode: "create" | "edit";
   initial: SkillFormInitial;
+  repos: RepoOption[];
 }) {
   const router = useRouter();
   const [slug, setSlug] = useState(initial.slug);
   const [name, setName] = useState(initial.name);
   const [description, setDescription] = useState(initial.description);
   const [body, setBody] = useState(initial.body);
+  const [repoId, setRepoId] = useState<string>(initial.repoId ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,6 +47,7 @@ export function SkillForm({
         name,
         description,
         body,
+        repoId: repoId === "" ? null : repoId,
       };
       if (mode === "create") payload.slug = slug;
 
@@ -121,6 +131,25 @@ export function SkillForm({
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Use this before any creative work — creating features, building components, adding functionality, or modifying behavior."
             />
+          </Field>
+          <Field
+            label="Repo scope"
+            htmlFor="repo"
+            description="Global skills materialize into every session. Scope to a repo to only load this skill in sessions bound to that repo."
+          >
+            <select
+              id="repo"
+              value={repoId}
+              onChange={(e) => setRepoId(e.target.value)}
+              className="w-full rounded-xl bg-surface-1 border border-hairline px-3.5 h-11 text-sm text-fg transition-colors duration-150 hover:border-strong focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-accent-soft"
+            >
+              <option value="">Global (all repos)</option>
+              {repos.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.slug}
+                </option>
+              ))}
+            </select>
           </Field>
         </div>
       </Card>

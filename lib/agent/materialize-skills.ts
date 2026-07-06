@@ -72,6 +72,11 @@ async function copyDirIfExists(src: string, dst: string): Promise<void> {
  *     doesn't load it from the project source. This keeps the per-agent
  *     selection actually scoped, not just additive over the folder.
  *
+ *  `sessionRepoId` (repo scoping, Phase 2):
+ *   - Skills with a non-null repoId are repo-scoped and are only materialized
+ *     when they match the session's repoId. Global (null repoId) skills are
+ *     always materialized. A session with no repo (null) only gets globals.
+ *
  * Failures are logged but never throw — a session should still start even
  * if one skill is malformed. The agent runs without that skill rather than
  * the operator losing access to the whole feature.
@@ -80,6 +85,7 @@ export async function materializeSkillsToWorktree(
   worktreePath: string,
   ownerId: string,
   allowedSkillIds: string[] | null = null,
+  sessionRepoId: string | null = null,
 ): Promise<void> {
   const skillsRoot = path.join(worktreePath, ".claude", "skills");
   await fs.mkdir(skillsRoot, { recursive: true });
@@ -93,12 +99,17 @@ export async function materializeSkillsToWorktree(
   // (2) Overlay DB skills, scoped to the agent's allowlist when set.
   const teamIds = await getMyTeamIds(ownerId);
   const allVisible = await listVisibleSkills(ownerId, teamIds);
+  // Repo scoping: drop skills bound to a different repo. Global (null) skills
+  // always flow in; a repo-scoped skill only matches its own session's repo.
+  const repoScoped = allVisible.filter(
+    (s) => s.repoId === null || s.repoId === sessionRepoId,
+  );
   let dbSkills: Skill[];
   if (allowedSkillIds === null) {
-    dbSkills = allVisible;
+    dbSkills = repoScoped;
   } else {
     const allow = new Set(allowedSkillIds);
-    dbSkills = allVisible.filter((s) => allow.has(s.id));
+    dbSkills = repoScoped.filter((s) => allow.has(s.id));
   }
 
   for (const s of dbSkills) {
