@@ -2,13 +2,18 @@ import "server-only";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { listVisibleSkills, type Skill } from "@/lib/db/skills";
+import { listVisibleSkillBundles } from "@/lib/db/skill-bundles";
 import { getMyTeamIds } from "@/lib/auth/authz";
 
 /**
  * Compose a SKILL.md from a DB row's frontmatter fields + body.
  * Matches the format the Claude Agent SDK expects.
  */
-function renderSkillFile(s: Skill): string {
+function renderSkillFile(s: {
+  name: string;
+  description: string;
+  body: string;
+}): string {
   const fm = [
     "---",
     `name: ${s.name}`,
@@ -152,6 +157,52 @@ export async function materializeSkillsToWorktree(
         `[skills] pruned ${pruned} folder-based skill(s) not in agent allowlist`,
       );
     }
+  }
+
+  // (4) Bundles (Hermes-style composition): each bundle becomes one more
+  //     skill dir whose body tells the agent to load its member skills via
+  //     the Skill tool. Members are resolved against the already-filtered
+  //     dbSkills set, so allowlist + repo scoping apply for free; a bundle
+  //     with zero surviving members is skipped. Written after the prune step
+  //     so agent allowlists don't remove bundles whose members are allowed.
+  //     On slug collision with a skill the bundle overwrites it (bundle wins,
+  //     mirroring Hermes precedence).
+  try {
+    const bundles = await listVisibleSkillBundles(ownerId, teamIds);
+    const bySkillId = new Map(dbSkills.map((s) => [s.id, s]));
+    let written = 0;
+    for (const b of bundles) {
+      const members = b.skillIds
+        .map((id) => bySkillId.get(id))
+        .filter((s): s is Skill => s !== undefined);
+      if (members.length === 0) continue;
+      const body = [
+        "This is a skill bundle. When invoked, load and follow ALL member",
+        "skills below (via the Skill tool) before doing anything else.",
+        "",
+        "Member skills:",
+        ...members.map((m) => `- ${m.slug}: ${m.description}`),
+        ...(b.instruction.trim() ? ["", b.instruction.trim()] : []),
+        "",
+      ].join("\n");
+      const dir = path.join(skillsRoot, b.slug);
+      try {
+        await fs.mkdir(dir, { recursive: true });
+        await fs.writeFile(
+          path.join(dir, "SKILL.md"),
+          renderSkillFile({ name: b.name, description: b.description, body }),
+          "utf8",
+        );
+        written++;
+      } catch (err) {
+        console.warn(`[skills] failed to write bundle ${b.slug}: ${err}`);
+      }
+    }
+    if (written > 0) {
+      console.log(`[skills] materialized ${written} skill bundle(s)`);
+    }
+  } catch (err) {
+    console.warn(`[skills] bundle materialization failed: ${err}`);
   }
 
   if (dbSkills.length > 0) {

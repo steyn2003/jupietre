@@ -527,6 +527,43 @@ export const skills = pgTable(
 );
 
 // ────────────────────────────────────────────────────────────────────
+// Skill bundles (Hermes-style composition)
+//
+// A bundle groups existing skills under one slug so agents get a handful of
+// composed entry points instead of a sprawl of tiny skills. Materialized as
+// one extra SKILL.md whose body tells the agent to load the member skills —
+// no SDK changes needed. A bundle overwrites a same-slug skill on
+// materialization (bundle wins, mirroring Hermes precedence).
+// ────────────────────────────────────────────────────────────────────
+
+export const skillBundles = pgTable(
+  "skill_bundles",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Optional team scope — same visibility rule as skills. */
+    teamId: text("team_id").references(() => teams.id, {
+      onDelete: "set null",
+    }),
+    /** kebab-case, used as the directory name under .claude/skills/. */
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    /** Member skill IDs. No join table — bundles are small, ordered lists.
+     *  IDs that no longer resolve (deleted skill) are skipped at
+     *  materialization. */
+    skillIds: text("skill_ids").array().notNull(),
+    /** Optional glue instruction appended after the member list. */
+    instruction: text("instruction").notNull().default(""),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("skill_bundles_owner_slug_idx").on(t.ownerId, t.slug)],
+);
+
+// ────────────────────────────────────────────────────────────────────
 // Skill drafts (Agentic OS — Phase 2, auto skill library)
 //
 // After an agent session goes quiet, the cheap-model "distiller" pass

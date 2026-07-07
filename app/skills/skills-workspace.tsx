@@ -4,20 +4,24 @@ import { useState } from "react";
 import { cn } from "@/components/ui/cn";
 import { SkillsList, type SkillRow } from "./skills-list";
 import { SkillDraftsReview, type DraftRow } from "./skill-drafts";
+import { BundlesTab, type BundleRow } from "./bundles-tab";
 
 export function SkillsWorkspace({
   currentUserId,
   initialSkills,
   initialDrafts,
+  initialBundles,
 }: {
   currentUserId: string;
   initialSkills: SkillRow[];
   initialDrafts: DraftRow[];
+  initialBundles: BundleRow[];
 }) {
-  const [tab, setTab] = useState<"library" | "drafts">(
+  const [tab, setTab] = useState<"library" | "bundles" | "drafts">(
     initialDrafts.length > 0 ? "drafts" : "library",
   );
   const [draftCount, setDraftCount] = useState(initialDrafts.length);
+  const [bundleCount, setBundleCount] = useState(initialBundles.length);
 
   return (
     <div className="space-y-5">
@@ -25,6 +29,10 @@ export function SkillsWorkspace({
         <TabButton active={tab === "library"} onClick={() => setTab("library")}>
           Library
           <span className="ml-1.5 text-fg-subtle">{initialSkills.length}</span>
+        </TabButton>
+        <TabButton active={tab === "bundles"} onClick={() => setTab("bundles")}>
+          Bundles
+          <span className="ml-1.5 text-fg-subtle">{bundleCount}</span>
         </TabButton>
         <TabButton active={tab === "drafts"} onClick={() => setTab("drafts")}>
           Drafts
@@ -38,6 +46,17 @@ export function SkillsWorkspace({
 
       {tab === "library" ? (
         <SkillsList currentUserId={currentUserId} initial={initialSkills} />
+      ) : tab === "bundles" ? (
+        <BundlesTab
+          currentUserId={currentUserId}
+          initial={initialBundles}
+          skillOptions={initialSkills.map((s) => ({
+            id: s.id,
+            slug: s.slug,
+            name: s.name,
+          }))}
+          onCountChange={setBundleCount}
+        />
       ) : (
         <SkillDraftsReview
           initial={initialDrafts}

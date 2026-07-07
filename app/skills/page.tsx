@@ -6,6 +6,7 @@ import { repos } from "@/lib/db/schema";
 import { getServerSession } from "@/lib/auth/session";
 import { getMyTeamIds, visibleReposWhere } from "@/lib/auth/authz";
 import { listVisibleSkills } from "@/lib/db/skills";
+import { listVisibleSkillBundles } from "@/lib/db/skill-bundles";
 import { listVisiblePendingDrafts } from "@/lib/db/skill-drafts";
 import { AppShell } from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/Button";
@@ -16,9 +17,10 @@ export default async function SkillsPage() {
   if (!session) redirect("/login");
 
   const myTeamIds = await getMyTeamIds(session.userId);
-  const [skills, drafts, repoRows] = await Promise.all([
+  const [skills, drafts, bundles, repoRows] = await Promise.all([
     listVisibleSkills(session.userId, myTeamIds),
     listVisiblePendingDrafts(session.userId, myTeamIds),
+    listVisibleSkillBundles(session.userId, myTeamIds),
     db
       .select({ id: repos.id, slug: repos.slug })
       .from(repos)
@@ -65,6 +67,15 @@ export default async function SkillsPage() {
           repoSlug: d.repoId ? (repoSlug.get(d.repoId) ?? null) : null,
           sourceSessionId: d.sourceSessionId,
           createdAt: d.createdAt.toISOString(),
+        }))}
+        initialBundles={bundles.map((b) => ({
+          id: b.id,
+          slug: b.slug,
+          name: b.name,
+          description: b.description,
+          skillIds: b.skillIds,
+          instruction: b.instruction,
+          ownerId: b.ownerId,
         }))}
       />
     </AppShell>
