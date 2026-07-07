@@ -40,4 +40,14 @@ export async function register() {
   // it seeds a "Nightly scout" schedule row per repo owner on first boot).
   const { startScheduler } = await import("@/lib/schedules/runner");
   startScheduler();
+
+  // Auto skill library: after sessions go quiet, a cheap-model pass distills
+  // reusable repo-specific procedures into skill drafts for operator review.
+  const { startSkillDistiller } = await import("@/lib/skills/distiller");
+  startSkillDistiller();
+
+  // Event bus: fans pending events (agent-emitted + webhook-injected) out to
+  // matching subscriptions, spawning a session per delivery.
+  const { startEventDispatcher } = await import("@/lib/events/dispatcher");
+  startEventDispatcher();
 }

@@ -3,6 +3,7 @@ import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
   agentConfigs,
+  connections,
   repos,
   sessions,
   teamMembers,
@@ -150,6 +151,46 @@ export function visibleReposWhere(userId: string, myTeamIds: string[]) {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Connections (Agentic OS) — same ACL shape as repos: `ownerId` (via the
+// `owner_id` column) + optional `teamId`. Team members can see and grant
+// team-scoped connections; only the owner / a team owner edits or deletes.
+// ────────────────────────────────────────────────────────────────────
+
+export interface ConnectionACL {
+  ownerId: string;
+  teamId: string | null;
+}
+
+/** See & grant the connection to agents. */
+export function canUseConnection(
+  userId: string,
+  c: ConnectionACL,
+  myTeamIds: Set<string>,
+): boolean {
+  if (c.ownerId === userId) return true;
+  if (c.teamId && myTeamIds.has(c.teamId)) return true;
+  return false;
+}
+
+/** Edit/delete the connection (mutates a secret). Owner-only, like repos. */
+export async function canEditConnection(
+  userId: string,
+  c: ConnectionACL,
+): Promise<boolean> {
+  if (c.ownerId === userId && c.teamId === null) return true;
+  if (c.teamId) return isTeamOwner(userId, c.teamId);
+  return false;
+}
+
+export function visibleConnectionsWhere(userId: string, myTeamIds: string[]) {
+  if (myTeamIds.length === 0) return eq(connections.ownerId, userId);
+  return or(
+    eq(connections.ownerId, userId),
+    inArray(connections.teamId, myTeamIds),
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
 // M12 — Workflows (definitions) and workflow runs. Same ACL shape as
 // agent_configs: `ownerId` + optional `teamId`. Team members can read
 // and run team-scoped workflows; only team owners edit/delete them.
@@ -185,6 +226,36 @@ export function visibleWorkflowsWhere(userId: string, myTeamIds: string[]) {
     eq(workflows.ownerId, userId),
     inArray(workflows.teamId, myTeamIds),
   );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Event bus (Agentic OS — Phase 3). Subscriptions and webhooks carry the
+// same ACL shape as connections: `ownerId` + optional `teamId`. Team members
+// can see them; only the owner / a team owner edits or deletes.
+// ────────────────────────────────────────────────────────────────────
+
+export interface OwnedTeamACL {
+  ownerId: string;
+  teamId: string | null;
+}
+
+export function canUseOwned(
+  userId: string,
+  a: OwnedTeamACL,
+  myTeamIds: Set<string>,
+): boolean {
+  if (a.ownerId === userId) return true;
+  if (a.teamId && myTeamIds.has(a.teamId)) return true;
+  return false;
+}
+
+export async function canEditOwned(
+  userId: string,
+  a: OwnedTeamACL,
+): Promise<boolean> {
+  if (a.ownerId === userId && a.teamId === null) return true;
+  if (a.teamId) return isTeamOwner(userId, a.teamId);
+  return false;
 }
 
 /** Convenience for routes — load + decide in one call. Returns null on no-access. */

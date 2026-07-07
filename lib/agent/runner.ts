@@ -467,6 +467,7 @@ export async function startTurn(params: {
             cwd,
             row.ownerId ?? row.userId,
             config.selectedSkills,
+            row.repoId,
           );
         } catch (err) {
           console.warn(`[runner] skill materialization failed:`, err);
@@ -484,11 +485,20 @@ export async function startTurn(params: {
       if (claudePath) options.pathToClaudeCodeExecutable = claudePath;
       if (row.sdkSessionId) options.resume = row.sdkSessionId;
 
+      // Connections granted to this agent (own + team). Fetched here alongside
+      // the config so buildMcpServersForSession stays sync. Agents with no
+      // grants get [] → legacy flag-only behavior is unchanged.
+      const { grantedConnectionsForAgent } = await import(
+        "@/lib/db/connections"
+      );
+      const grantedConnections = await grantedConnectionsForAgent(config.id);
+
       const mcpServers = buildMcpServersForSession({
         sessionId,
         repoPath: cwd,
         clonePath,
         agent: config,
+        grantedConnections,
         workflowRunId: row.workflowRunId,
       });
       if (mcpServers) options.mcpServers = mcpServers;

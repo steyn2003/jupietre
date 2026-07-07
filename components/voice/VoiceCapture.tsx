@@ -326,7 +326,9 @@ export function VoiceCapture() {
         onClick={() => setOpen((o) => !o)}
         aria-label={open ? "Close voice capture" : "Open voice capture"}
         className={cn(
-          "fixed bottom-5 right-5 z-50 h-12 w-12 rounded-full",
+          // Below lg the mobile tab bar (64px + safe area) owns the bottom
+          // edge — float above it. Desktop keeps the classic corner spot.
+          "fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] lg:bottom-5 right-5 z-50 h-12 w-12 rounded-full",
           "flex items-center justify-center",
           "ring-1 transition-all duration-200",
           liveActive
@@ -356,7 +358,7 @@ export function VoiceCapture() {
             exit={{ opacity: 0, y: 12, scale: 0.96 }}
             transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
             className={cn(
-              "fixed bottom-20 right-5 z-50 w-[360px] max-w-[calc(100vw-2.5rem)]",
+              "fixed bottom-[calc(8.5rem+env(safe-area-inset-bottom))] lg:bottom-20 right-5 z-50 w-[360px] max-w-[calc(100vw-2.5rem)]",
               "rounded-2xl ring-1 ring-hairline bg-surface-1/95 backdrop-blur-xl",
               "shadow-[0_24px_56px_-16px_rgba(0,0,0,0.5)] overflow-hidden",
             )}

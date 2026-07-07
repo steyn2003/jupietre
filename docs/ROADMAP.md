@@ -125,6 +125,12 @@ Plan: [`docs/superpowers/plans/2026-04-24-agent-workflows.md`](./superpowers/pla
 
 ---
 
+### M13 — Mission Control (`/work`) ✅ shipped
+
+One ledger over everything the OS is doing. `/work` unions standalone sessions (workflow-run children fold under their run) with workflow runs into a single date-grouped list: origin badge (Manual / Linear issue id / Agent / Schedule / Event / Workflow), derived live state (`running / needs approval / awaiting / error / done / idle` — pending `tool_approval_requests` roll up to the owning session or run), and outcome chips (commit count + external PR links from `session_artifacts`). Header shows active / needs-attention / PRs-this-week counts plus filter chips driven by `?f=` search params — server-rendered, zero client JS. Pure query over existing tables; no schema change. Nav gains a primary "Work" entry.
+
+---
+
 ## Explicitly out of scope
 
 Decisions made deliberately — reopen only with a strong reason.

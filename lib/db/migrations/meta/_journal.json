@@ -64,6 +64,27 @@
       "when": 1782999606302,
       "tag": "0008_keen_starhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1783369742776,
+      "tag": "0009_rare_wallop",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783370918400,
+      "tag": "0010_wandering_elektra",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1783371629036,
+      "tag": "0011_noisy_proudstar",
+      "breakpoints": true
     }
   ]
 }

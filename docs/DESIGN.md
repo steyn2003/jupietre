@@ -153,9 +153,9 @@ Every primitive is small, typed, and consumes tokens — no inline hex.
 
 ## 4. Layout (`components/layout/`)
 
-### `TopNav`
+### Navigation (`Sidebar` / `MobileTabBar` / `MobileMenuSheet`)
 
-Floating glass pill, `sticky top-3`, `backdrop-blur-xl`, hairline ring, diffused shadow. Brand mark + nav items with Phosphor icons. The active-route indicator is a single `motion.span` with `layoutId="nav-pill"` — Framer animates it from one item to the next when you navigate.
+The IA lives once in `nav.ts` (top-level items + Build / Automate / Platform groups, Phosphor icons, segment-aware active matching). Desktop (lg+) renders `Sidebar` — a fixed 240px glass rail (`bg-surface-1/70 backdrop-blur-xl`, hairline border) with every destination always visible and the account footer at the bottom; the active-route indicator is a `motion.span` with `layoutId="sidebar-pill"`. Below lg, `MobileTabBar` is a fixed 64px bottom bar (+ `env(safe-area-inset-bottom)` for the iPhone home indicator) with Control / Work / Sessions / Agents tabs plus a Menu tab that opens `MobileMenuSheet`, a bottom sheet docked above the bar listing the remaining grouped destinations and sign-out.
 
 ### `AppShell`
 
@@ -257,7 +257,7 @@ To change the brand:
 
 That's it. Buttons, badges, focus rings, status dots, sparklines, the active nav pill — all update.
 
-To change density or radius scale, edit `--radius-*` in `@theme inline`. To change motion personality, edit `--ease-spring` and the spring stiffness/damping values used in `Button.tsx` and `TopNav.tsx`.
+To change density or radius scale, edit `--radius-*` in `@theme inline`. To change motion personality, edit `--ease-spring` and the spring stiffness/damping values used in `Button.tsx`, `Sidebar.tsx`, and `MobileTabBar.tsx`.
 
 ---
 

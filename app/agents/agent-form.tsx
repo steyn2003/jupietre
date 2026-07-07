@@ -40,6 +40,7 @@ export interface AgentFormInitial {
   enableLinearTools: boolean;
   enableGithubTools: boolean;
   enableAgentTools: boolean;
+  enableEventTools: boolean;
   approvalMode: "none" | "list" | "all";
   approvalTools: string[];
   approvalTimeoutSeconds: number;
@@ -109,6 +110,9 @@ export function AgentForm({
   const [enableAgentTools, setEnableAgentTools] = useState(
     initial.enableAgentTools,
   );
+  const [enableEventTools, setEnableEventTools] = useState(
+    initial.enableEventTools,
+  );
   const [approvalMode, setApprovalMode] = useState<"none" | "list" | "all">(
     initial.approvalMode,
   );
@@ -169,6 +173,7 @@ export function AgentForm({
         enableLinearTools,
         enableGithubTools,
         enableAgentTools,
+        enableEventTools,
         approvalMode,
         approvalTools: approvalMode === "list" ? approvalTools : [],
         approvalTimeoutSeconds,
@@ -452,6 +457,21 @@ export function AgentForm({
                 <code className="font-mono text-[12px]">agent_*</code> tools
                 (spawn / wait / message sub-agent sessions). Makes this agent
                 an orchestrator.
+              </>
+            }
+          />
+          <CheckboxRow
+            checked={enableEventTools}
+            onChange={setEnableEventTools}
+            label={
+              <>
+                Event tools — expose{" "}
+                <code className="font-mono text-[12px]">event_*</code> tools
+                (emit / recent). Lets this agent publish onto the{" "}
+                <a href="/events" className="underline hover:text-fg">
+                  event bus
+                </a>
+                .
               </>
             }
           />

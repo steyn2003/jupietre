@@ -59,6 +59,7 @@ export default async function EditAgentPage({
           enableLinearTools: row.enableLinearTools === 1,
           enableGithubTools: row.enableGithubTools === 1,
           enableAgentTools: row.enableAgentTools === 1,
+          enableEventTools: row.enableEventTools === 1,
           approvalMode: row.approvalMode,
           approvalTools: row.approvalTools,
           approvalTimeoutSeconds: row.approvalTimeoutSeconds,

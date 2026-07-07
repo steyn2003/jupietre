@@ -25,10 +25,11 @@ async function run(
   args: string[],
   cwd: string,
   timeoutMs = 60_000,
+  extraEnv?: Record<string, string>,
 ): Promise<string> {
   const { stdout, stderr } = await exec(cmd, args, {
     cwd,
-    env: process.env,
+    env: extraEnv ? { ...process.env, ...extraEnv } : process.env,
     timeout: timeoutMs,
     maxBuffer: 10 * 1024 * 1024,
   });
@@ -69,9 +70,18 @@ async function installDeps(dir: string): Promise<void> {
   }
 }
 
-async function resolveRepoSlug(cwd: string): Promise<string | null> {
+async function resolveRepoSlug(
+  cwd: string,
+  authEnv?: Record<string, string>,
+): Promise<string | null> {
   try {
-    const out = await run("gh", ["repo", "view", "--json", "nameWithOwner"], cwd);
+    const out = await run(
+      "gh",
+      ["repo", "view", "--json", "nameWithOwner"],
+      cwd,
+      60_000,
+      authEnv,
+    );
     const parsed = JSON.parse(out.split(/\r?\n/)[0] ?? "{}") as {
       nameWithOwner?: string;
     };
@@ -81,7 +91,16 @@ async function resolveRepoSlug(cwd: string): Promise<string | null> {
   }
 }
 
-export function buildGithubTools(sessionId: string, repoPath: string) {
+export function buildGithubTools(
+  sessionId: string,
+  repoPath: string,
+  grantedToken?: string,
+) {
+  // A granted GitHub token is injected into the gh/git subprocess env,
+  // overriding any ambient GITHUB_TOKEN. undefined = fall back to env.
+  const authEnv: Record<string, string> | undefined = grantedToken
+    ? { GITHUB_TOKEN: grantedToken, GH_TOKEN: grantedToken }
+    : undefined;
   return [
     tool(
       "git_create_worktree",
@@ -97,7 +116,7 @@ export function buildGithubTools(sessionId: string, repoPath: string) {
       },
       async ({ branch, baseBranch }) => {
         const worktreeDir = worktreePathFor(branch);
-        await run("git", ["fetch", "origin", baseBranch], repoPath, 120_000);
+        await run("git", ["fetch", "origin", baseBranch], repoPath, 120_000, authEnv);
         await run(
           "git",
           [
@@ -144,6 +163,7 @@ export function buildGithubTools(sessionId: string, repoPath: string) {
           ["push", "origin", branch],
           cwd,
           120_000,
+          authEnv,
         );
         return {
           content: [
@@ -170,7 +190,7 @@ export function buildGithubTools(sessionId: string, repoPath: string) {
         const worktreeDir = worktreePathFor(head);
         const cwd = existsSync(worktreeDir) ? worktreeDir : repoPath;
         const repoSlug =
-          process.env.GITHUB_REPO ?? (await resolveRepoSlug(cwd));
+          process.env.GITHUB_REPO ?? (await resolveRepoSlug(cwd, authEnv));
         const args = [
           "pr",
           "create",
@@ -186,7 +206,7 @@ export function buildGithubTools(sessionId: string, repoPath: string) {
         if (repoSlug) args.push("--repo", repoSlug);
         if (labels.length > 0) args.push("--label", labels.join(","));
 
-        const result = await run("gh", args, cwd, 120_000);
+        const result = await run("gh", args, cwd, 120_000, authEnv);
         const urlMatch = result.match(/https?:\/\/\S*pull\/\d+/);
         const prUrl = urlMatch?.[0];
         const prNumber = prUrl?.match(/\/pull\/(\d+)/)?.[1];
@@ -233,7 +253,7 @@ export function buildGithubTools(sessionId: string, repoPath: string) {
       },
       async ({ prNumber, action, body }) => {
         const repoSlug =
-          process.env.GITHUB_REPO ?? (await resolveRepoSlug(repoPath));
+          process.env.GITHUB_REPO ?? (await resolveRepoSlug(repoPath, authEnv));
         const flag = action === "approve" ? "--approve" : "--request-changes";
         const args = [
           "pr",
@@ -244,7 +264,7 @@ export function buildGithubTools(sessionId: string, repoPath: string) {
           body,
         ];
         if (repoSlug) args.push("--repo", repoSlug);
-        const result = await run("gh", args, repoPath);
+        const result = await run("gh", args, repoPath, 60_000, authEnv);
         return {
           content: [
             {

@@ -15,6 +15,8 @@ import {
  * Resolve which Linear API key this session should call with.
  *
  * Order of precedence:
+ *   0. A granted linear connection's key (Agentic OS). When the agent has a
+ *      linear connection granted, that credential is explicit and wins.
  *   1. The poller that originated this session (sessions.linearPollerId).
  *      Critical: prevents cross-workspace mixups when more than one poller
  *      is configured — the agent must talk to the workspace the issue came
@@ -23,7 +25,11 @@ import {
  *      `enableLinearTools=1` but isn't bound to any specific workspace).
  *   3. The LINEAR_API_KEY env var (legacy / pre-migration fallback).
  */
-async function getClient(sessionId: string): Promise<LinearClient> {
+async function getClient(
+  sessionId: string,
+  grantedKey?: string,
+): Promise<LinearClient> {
+  if (grantedKey) return new LinearClient({ apiKey: grantedKey });
   const sessionRow = (
     await db
       .select({ linearPollerId: sessions.linearPollerId })
@@ -52,7 +58,7 @@ async function getClient(sessionId: string): Promise<LinearClient> {
   return new LinearClient({ apiKey: fallback });
 }
 
-export function buildLinearTools(sessionId: string) {
+export function buildLinearTools(sessionId: string, grantedKey?: string) {
   return [
     tool(
       "linear_get_issue",
@@ -63,7 +69,7 @@ export function buildLinearTools(sessionId: string) {
           .describe("Issue ID (UUID) or identifier (e.g. ENG-123)"),
       },
       async ({ issueId }) => {
-        const client = await getClient(sessionId);
+        const client = await getClient(sessionId, grantedKey);
         const issue = await client.issue(issueId);
         const state = await issue.state;
         const labels = await issue.labels();
@@ -104,7 +110,7 @@ export function buildLinearTools(sessionId: string) {
           ),
       },
       async ({ issueId, stateName }) => {
-        const client = await getClient(sessionId);
+        const client = await getClient(sessionId, grantedKey);
         const issue = await client.issue(issueId);
         const team = await issue.team;
         if (!team) throw new Error("Issue has no team");
@@ -140,7 +146,7 @@ export function buildLinearTools(sessionId: string) {
         body: z.string().describe("Comment body in markdown"),
       },
       async ({ issueId, body }) => {
-        const client = await getClient(sessionId);
+        const client = await getClient(sessionId, grantedKey);
         const issue = await client.issue(issueId);
         const result = await client.createComment({
           issueId: issue.id,
@@ -186,7 +192,7 @@ export function buildLinearTools(sessionId: string) {
         labelNames: z.array(z.string()).optional(),
       },
       async ({ issueId, title, description, priority, labelNames }) => {
-        const client = await getClient(sessionId);
+        const client = await getClient(sessionId, grantedKey);
         const issue = await client.issue(issueId);
 
         const update: Record<string, unknown> = {};
@@ -232,7 +238,7 @@ export function buildLinearTools(sessionId: string) {
         labelNames: z.array(z.string()).optional(),
       },
       async ({ title, description, teamKey, parentId, labelNames }) => {
-        const client = await getClient(sessionId);
+        const client = await getClient(sessionId, grantedKey);
         const teams = await client.teams({
           filter: { key: { eq: teamKey } },
         });

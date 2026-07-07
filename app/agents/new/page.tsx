@@ -45,6 +45,7 @@ export default async function NewAgentPage() {
           enableLinearTools: false,
           enableGithubTools: false,
           enableAgentTools: false,
+          enableEventTools: false,
           approvalMode: "none",
           approvalTools: [],
           approvalTimeoutSeconds: 300,
