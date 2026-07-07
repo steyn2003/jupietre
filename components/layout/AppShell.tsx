@@ -1,14 +1,21 @@
 import * as React from "react";
-import { TopNav } from "./TopNav";
+import { Sidebar } from "./Sidebar";
+import { MobileTabBar } from "./MobileTabBar";
 import { Eyebrow } from "@/components/ui";
 import { cn } from "@/components/ui/cn";
 import { VoiceCapture } from "@/components/voice/VoiceCapture";
 
 /**
- * Outer page chrome for authenticated routes. Renders the floating TopNav,
- * an optional page header (eyebrow + title + description + action), and a
- * width-constrained content well. Pass `fluid` to fill the viewport (used
- * by /sessions/[id] which manages its own column scroll).
+ * Outer page chrome for authenticated routes. Renders the fixed desktop
+ * sidebar (lg+) and the mobile bottom tab bar + menu sheet (below lg), an
+ * optional page header (eyebrow + title + description + action), and a
+ * width-constrained content well. Pass `fluid` to widen the well (used by
+ * / and /sessions/[id] which manage their own internal viewport math).
+ *
+ * Layout contract: the sidebar is fixed at 240px so the shell reserves
+ * `lg:pl-[240px]`; the tab bar is 64px + safe-area so content keeps
+ * `pb-28` clearance on mobile. Both bars are `fixed` and carry their own
+ * env() insets — the body's safe-area padding only offsets in-flow content.
  */
 export function AppShell({
   email,
@@ -35,13 +42,13 @@ export function AppShell({
   const hasHeader = Boolean(title || eyebrow || description || action || back);
 
   return (
-    <div className="min-h-[100dvh] flex flex-col">
-      <TopNav email={email} />
+    <div className="min-h-[100dvh] flex flex-col lg:pl-[240px]">
+      <Sidebar email={email} />
       <main
         className={cn(
           "flex-1 mx-auto w-full px-4 sm:px-6",
           fluid ? "max-w-[1180px]" : "max-w-[920px]",
-          "pt-6 pb-16",
+          "pt-8 lg:pt-10 pb-28 lg:pb-16",
           className,
         )}
       >
@@ -75,6 +82,7 @@ export function AppShell({
         ) : null}
         {children}
       </main>
+      <MobileTabBar email={email} />
       {/* Floating voice-capture widget — available on every authenticated
        *  page so the operator can dictate tickets while testing the app in
        *  another tab. Skipped on /login because that view doesn't render
