@@ -29,14 +29,19 @@ export function Sidebar({ email }: { email?: string }) {
     >
       <Link
         href="/"
-        aria-label="Jupietre — Control"
+        aria-label="Jupietre — Agent Management OS"
         className="flex items-center gap-2.5 px-5 pt-5 pb-2"
       >
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-fg text-bg font-mono text-[13px] font-semibold">
           J
         </span>
-        <span className="text-[14px] font-medium tracking-tight text-fg">
-          Jupietre
+        <span className="flex min-w-0 flex-col leading-none">
+          <span className="text-[14px] font-medium tracking-tight text-fg">
+            Jupietre
+          </span>
+          <span className="mt-1 text-[9.5px] uppercase tracking-[0.16em] text-fg-subtle">
+            Agent Management OS
+          </span>
         </span>
       </Link>
 

@@ -1,6 +1,6 @@
 # Jupietre
 
-Autonomous AI agent team that processes Linear tickets end-to-end. Built on the [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk/overview).
+Agent Management OS — run, orchestrate and observe an AI agent workforce from one control plane: sessions, workflows, skills, connections, and approvals, with running work lighting up as it flows through the system. Built on the [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk/overview). The reference workforce below is an autonomous team that processes Linear tickets end-to-end.
 
 Three agents poll Linear for tickets with the `agent` label and move them through a pipeline (state names are [configurable via env vars](#environment-variables)):
 

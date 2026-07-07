@@ -19,6 +19,7 @@ import { listVisibleRuns } from "@/lib/workflows/runs";
 import { AppShell } from "@/components/layout/AppShell";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ConstellationBackground } from "@/components/visual/ConstellationBackground";
 import { cn } from "@/components/ui/cn";
 
 // ────────────────────────────────────────────────────────────────────
@@ -295,19 +296,56 @@ export default async function WorkPage({
       </div>
 
       {visible.length === 0 ? (
-        <EmptyState
-          icon={<ListChecksIcon weight="regular" className="h-5 w-5" />}
-          title={filter === "all" ? "Nothing in the ledger yet" : "Nothing here"}
-          description={
-            filter === "all"
-              ? "Work shows up here as sessions start and workflows run — from the UI, Linear, schedules, or events."
-              : "No items match this filter right now."
-          }
-        />
+        filter === "all" ? (
+          <EmptyLedger />
+        ) : (
+          <EmptyState
+            icon={<ListChecksIcon weight="regular" className="h-5 w-5" />}
+            title="Nothing here"
+            description="No items match this filter right now."
+          />
+        )
       ) : (
         <WorkGroups items={visible} />
       )}
     </AppShell>
+  );
+}
+
+/**
+ * The pristine, nothing-shipped-yet ledger. Only shown when the workspace is
+ * genuinely empty, so the ambient constellation never fights real data — it
+ * simply signals a live system waiting for work to flow through. Rendered
+ * smaller and dimmer than the login hero, with no parallax.
+ */
+function EmptyLedger() {
+  return (
+    <div className="relative flex min-h-[440px] items-center justify-center overflow-hidden rounded-2xl px-6 py-12 ring-1 ring-hairline bg-surface-1/40">
+      <ConstellationBackground
+        className="pointer-events-none absolute inset-0"
+        density={0.55}
+        intensity={0.7}
+        interactive={false}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_70%_60%_at_center,rgba(11,11,12,0.82)_0%,rgba(11,11,12,0.5)_45%,transparent_88%)]"
+      />
+      <div className="relative z-10 flex max-w-[42ch] flex-col items-center gap-3 text-center">
+        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-surface-2/80 text-fg-muted ring-1 ring-hairline shadow-[var(--shadow-inset-hi)] backdrop-blur-sm">
+          <ListChecksIcon weight="regular" className="h-5 w-5" />
+        </div>
+        <div className="space-y-1">
+          <h3 className="text-[15px] font-medium tracking-tight text-fg">
+            Nothing in the ledger yet
+          </h3>
+          <p className="text-[13px] leading-relaxed text-fg-muted">
+            Work shows up here as sessions start and workflows run — from the
+            UI, Linear, schedules, or events.
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }
 

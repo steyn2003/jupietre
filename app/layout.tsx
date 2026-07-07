@@ -4,8 +4,9 @@ import { GeistMono } from "geist/font/mono";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Jupietre Agents",
-  description: "Local agents control center.",
+  title: "Jupietre — Agent Management OS",
+  description:
+    "Run, orchestrate and observe an AI agent workforce — sessions, workflows, skills, and approvals in one operating system.",
   // iOS doesn't auto-route SVG apple-icon — point it at the same SVG used for /icon.
   // Drop a `app/apple-icon.png` file later if you want a pixel-perfect raster icon.
   icons: {
