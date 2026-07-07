@@ -459,10 +459,12 @@ const PULSE_FRAG = /* glsl */ `
 const DEFAULT_YAW = 0.26;
 const DEFAULT_PITCH = 0.16;
 const BASE_DIST = 38;
-const MIN_DIST = 14;
-const MAX_DIST = 70;
-const MIN_PITCH = -0.45;
-const MAX_PITCH = 0.85;
+const MIN_DIST = 8;
+const MAX_DIST = 120;
+const MIN_PITCH = -1.15;
+const MAX_PITCH = 1.15;
+const PAN_LIMIT = 32;
+const DEFAULT_TARGET = new THREE.Vector3(-1.2, 0, -1.5);
 const IDLE_MS = 3000;
 const MAX_PULSES = 28;
 
@@ -551,10 +553,9 @@ export default function ControlCanvas3D({
     container.appendChild(labelLayer);
 
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 220);
-    const TARGET = new THREE.Vector3(-1.2, 0, -1.5);
+    const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 300);
 
-    // ── Camera rig — damped orbit around TARGET ─────────────────────
+    // ── Camera rig — damped orbit around a pannable target ──────────
     let defaultDist = BASE_DIST;
     let yawT = DEFAULT_YAW;
     let pitchT = DEFAULT_PITCH;
@@ -562,17 +563,44 @@ export default function ControlCanvas3D({
     let yaw = yawT;
     let pitch = pitchT;
     let dist = distT;
+    const target = DEFAULT_TARGET.clone();
+    const targetT = DEFAULT_TARGET.clone();
     let userZoomed = false;
+    // Once the user moves the camera themselves, the idle auto-drift stays
+    // off — it must never fight a deliberately chosen vantage. Reset view
+    // re-arms it.
+    let userMoved = false;
     let driftDir = 1;
     let lastInteract = performance.now();
 
     function updateCamera() {
       camera.position.set(
-        TARGET.x + dist * Math.sin(yaw) * Math.cos(pitch),
-        TARGET.y + dist * Math.sin(pitch),
-        TARGET.z + dist * Math.cos(yaw) * Math.cos(pitch),
+        target.x + dist * Math.sin(yaw) * Math.cos(pitch),
+        target.y + dist * Math.sin(pitch),
+        target.z + dist * Math.cos(yaw) * Math.cos(pitch),
       );
-      camera.lookAt(TARGET);
+      camera.lookAt(target);
+    }
+
+    // Pan — slide the orbit target along the camera's right/up plane, so
+    // dragging feels like grabbing the scene. Scaled to world-units-per-pixel
+    // at the current distance; clamped so nobody gets lost in the void.
+    const panRight = new THREE.Vector3();
+    const panUp = new THREE.Vector3();
+    function panBy(dxPx: number, dyPx: number) {
+      const wpp =
+        (2 * distT * Math.tan((camera.fov * Math.PI) / 360)) /
+        Math.max(height, 1);
+      panRight.set(1, 0, 0).applyQuaternion(camera.quaternion);
+      panUp.set(0, 1, 0).applyQuaternion(camera.quaternion);
+      targetT.addScaledVector(panRight, -dxPx * wpp);
+      targetT.addScaledVector(panUp, dyPx * wpp);
+      targetT.set(
+        clamp(targetT.x, -PAN_LIMIT, PAN_LIMIT),
+        clamp(targetT.y, -PAN_LIMIT, PAN_LIMIT),
+        clamp(targetT.z, -PAN_LIMIT, PAN_LIMIT),
+      );
+      userMoved = true;
     }
 
     // ── Shared materials (one each — 3 draw calls total) ────────────
@@ -954,6 +982,7 @@ export default function ControlCanvas3D({
         yaw = yawT;
         pitch = pitchT;
         dist = distT;
+        target.copy(targetT);
         updateCamera();
         renderFrame();
       });
@@ -962,9 +991,9 @@ export default function ControlCanvas3D({
     function loop() {
       const dt = Math.min(clock.getDelta(), 0.05);
       const t = clock.elapsedTime;
-      // Gentle auto-drift when idle >3s — a slow pendulum around the default
-      // yaw, so an abandoned tab always eases back to a sane vantage.
-      if (performance.now() - lastInteract > IDLE_MS) {
+      // Gentle auto-drift when idle >3s — only until the user takes the
+      // camera themselves; after that their vantage is never fought.
+      if (!userMoved && performance.now() - lastInteract > IDLE_MS) {
         yawT += dt * 0.02 * driftDir;
         if (yawT > DEFAULT_YAW + 0.45) driftDir = -1;
         else if (yawT < DEFAULT_YAW - 0.45) driftDir = 1;
@@ -973,6 +1002,7 @@ export default function ControlCanvas3D({
       yaw += (yawT - yaw) * k;
       pitch += (pitchT - pitch) * k;
       dist += (distT - dist) * k;
+      target.lerp(targetT, k);
       updateCamera();
       uTime.value = t + 1.3;
       stepPulses(dt);
@@ -1029,6 +1059,9 @@ export default function ControlCanvas3D({
     let downY = 0;
     let downChipKey: string | null = null;
     let pinchDist = 0;
+    let panMode = false;
+    let centX = 0;
+    let centY = 0;
 
     function markInteraction() {
       lastInteract = performance.now();
@@ -1064,6 +1097,9 @@ export default function ControlCanvas3D({
         downX = e.clientX;
         downY = e.clientY;
         moved = false;
+        // Right / middle mouse or shift-drag pans; plain drag orbits.
+        panMode = e.button === 1 || e.button === 2 || e.shiftKey;
+        if (e.button === 1) e.preventDefault(); // no middle-click autoscroll
       }
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       try {
@@ -1074,6 +1110,8 @@ export default function ControlCanvas3D({
       if (pointers.size === 2) {
         const [p1, p2] = [...pointers.values()];
         pinchDist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+        centX = (p1.x + p2.x) / 2;
+        centY = (p1.y + p2.y) / 2;
         moved = true;
       }
       markInteraction();
@@ -1101,10 +1139,16 @@ export default function ControlCanvas3D({
           Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY) > 6
         )
           moved = true;
-        if (moved) container!.style.cursor = "grabbing";
-        yawT -= dx * 0.005;
-        pitchT = clamp(pitchT + dy * 0.004, MIN_PITCH, MAX_PITCH);
+        if (moved) container!.style.cursor = panMode ? "move" : "grabbing";
+        if (panMode) {
+          panBy(dx, dy);
+        } else {
+          yawT -= dx * 0.005;
+          pitchT = clamp(pitchT + dy * 0.004, MIN_PITCH, MAX_PITCH);
+          if (moved) userMoved = true;
+        }
       } else if (pointers.size === 2) {
+        // Two fingers: pinch zooms, moving the midpoint pans.
         const [p1, p2] = [...pointers.values()];
         const d = Math.hypot(p1.x - p2.x, p1.y - p2.y);
         if (pinchDist > 0 && d > 0) {
@@ -1112,6 +1156,11 @@ export default function ControlCanvas3D({
           userZoomed = true;
         }
         pinchDist = d;
+        const cx = (p1.x + p2.x) / 2;
+        const cy = (p1.y + p2.y) / 2;
+        panBy(cx - centX, cy - centY);
+        centX = cx;
+        centY = cy;
       }
       markInteraction();
       requestRender();
@@ -1122,7 +1171,8 @@ export default function ControlCanvas3D({
       if (pointers.size < 2) pinchDist = 0;
       if (wasTracked && pointers.size === 0) {
         container!.style.cursor = "grab";
-        if (!moved) {
+        panMode = false;
+        if (!moved && e.button === 0) {
           if (downChipKey) {
             pickByKey(downChipKey);
           } else {
@@ -1157,10 +1207,17 @@ export default function ControlCanvas3D({
       e.preventDefault();
       distT = clamp(distT * Math.exp(e.deltaY * 0.0012), MIN_DIST, MAX_DIST);
       userZoomed = true;
+      userMoved = true;
       markInteraction();
       requestRender();
     }
 
+    // Right mouse button is the pan gesture — keep the browser menu out.
+    function onContextMenu(e: Event) {
+      e.preventDefault();
+    }
+
+    container.addEventListener("contextmenu", onContextMenu);
     container.addEventListener("pointerdown", onPointerDown);
     container.addEventListener("pointermove", onPointerMove);
     container.addEventListener("pointerup", onPointerUp);
@@ -1192,7 +1249,9 @@ export default function ControlCanvas3D({
         yawT = DEFAULT_YAW;
         pitchT = DEFAULT_PITCH;
         distT = defaultDist;
+        targetT.copy(DEFAULT_TARGET);
         userZoomed = false;
+        userMoved = false;
         driftDir = 1;
         markInteraction();
         requestRender();
@@ -1206,6 +1265,7 @@ export default function ControlCanvas3D({
       if (staticRaf) cancelAnimationFrame(staticRaf);
       ro.disconnect();
       document.removeEventListener("visibilitychange", onVisibility);
+      container.removeEventListener("contextmenu", onContextMenu);
       container.removeEventListener("pointerdown", onPointerDown);
       container.removeEventListener("pointermove", onPointerMove);
       container.removeEventListener("pointerup", onPointerUp);
@@ -1238,7 +1298,7 @@ export default function ControlCanvas3D({
     <div
       ref={containerRef}
       role="application"
-      aria-label="Workspace control graph — drag to orbit, scroll or pinch to zoom, click a node to open it"
+      aria-label="Workspace control graph — drag to orbit, right-drag or shift-drag to pan, scroll or pinch to zoom, click a node to open it"
       className={className}
       style={{
         position: "relative",

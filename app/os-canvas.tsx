@@ -4,7 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence } from "framer-motion";
-import { CornersOutIcon, RobotIcon } from "@phosphor-icons/react";
+import {
+  ArrowCounterClockwiseIcon,
+  CornersInIcon,
+  CornersOutIcon,
+  RobotIcon,
+} from "@phosphor-icons/react";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Button } from "@/components/ui/Button";
 import ControlCanvas3D, {
@@ -37,6 +42,20 @@ export function OsCanvas() {
   const [data, setData] = useState<GraphDTO | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const canvasRef = useRef<ControlCanvas3DHandle>(null);
+
+  // Native Fullscreen API on the wrapper (canvas + legend + inspector all
+  // live inside it, so everything keeps working while fullscreen).
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void wrapRef.current?.requestFullscreen();
+  }, []);
 
   // Latest graph, readable from stable callbacks without re-binding them
   // every poll (keeps the 3D component's props referentially calm).
@@ -123,11 +142,17 @@ export function OsCanvas() {
   }
 
   return (
-    <div className="relative">
+    <div
+      ref={wrapRef}
+      className="relative"
+      style={isFullscreen ? { background: "var(--bg)" } : undefined}
+    >
       <div
         style={{
-          height: "clamp(480px, 72vh, 900px)",
-          borderRadius: 16,
+          height: isFullscreen
+            ? "100%"
+            : "clamp(480px, calc(100dvh - 210px), 1400px)",
+          borderRadius: isFullscreen ? 0 : 16,
           overflow: "hidden",
           background:
             "linear-gradient(180deg, var(--surface-1, rgba(0,0,0,0.02)) 0%, transparent 100%)",
@@ -155,9 +180,24 @@ export function OsCanvas() {
             onClick={() => canvasRef.current?.resetView()}
             className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full bg-surface-1/80 px-2.5 py-1 text-[11px] text-fg-muted ring-1 ring-hairline backdrop-blur hover:text-fg"
           >
-            <CornersOutIcon weight="bold" className="h-3 w-3" />
+            <ArrowCounterClockwiseIcon weight="bold" className="h-3 w-3" />
             Reset view
           </button>
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full bg-surface-1/80 px-2.5 py-1 text-[11px] text-fg-muted ring-1 ring-hairline backdrop-blur hover:text-fg"
+          >
+            {isFullscreen ? (
+              <CornersInIcon weight="bold" className="h-3 w-3" />
+            ) : (
+              <CornersOutIcon weight="bold" className="h-3 w-3" />
+            )}
+            {isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+          </button>
+          <span className="hidden sm:inline text-[10px] text-fg-subtle">
+            drag orbit · right-drag pan · scroll zoom
+          </span>
           {LEGEND.map(([label, color]) => (
             <span
               key={label}
